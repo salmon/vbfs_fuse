@@ -1,0 +1,5 @@
+vbfs_fuse_getattr
+vbfs_fuse_readdir path /
+vbfs_fuse_getattr
+vbfs_fuse_readdir path /
+vbfs_fuse_getattr
