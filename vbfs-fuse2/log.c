@@ -7,9 +7,9 @@
 
 int is_debug = 0;
 
-int log_init()
+int log_init(void)
 {
-	openlog(log_name, 0, LOG_DAEMON);
+	openlog("vbfs-fuse", 0, LOG_DAEMON);
 	setlogmask(LOG_UPTO(LOG_DEBUG));
 
 	is_debug = 1;

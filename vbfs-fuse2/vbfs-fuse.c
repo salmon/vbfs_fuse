@@ -1,6 +1,11 @@
-#include "utils.h"
+#define FUSE_USE_VERSION 29
+
+#include "vbfs-fuse.h"
 #include "log.h"
 #include "mempool.h"
+#include "super.h"
+
+vbfs_fuse_context_t vbfs_ctx;
 
 static int vbfs_getattr(const char *path, struct stat *stbuf);
 static int vbfs_fgetattr(const char *path, struct stat *stbuf,
@@ -32,7 +37,7 @@ static int vbfs_fsync(const char *path, int isdatasync, struct fuse_file_info *f
 static void *vbfs_init(struct fuse_conn_info *conn);
 static void vbfs_destroy(void *data);
 
-static struct fuse_operations = {
+static struct fuse_operations vbfs_op = {
 	.getattr	= vbfs_getattr,
 	.fgetattr	= vbfs_fgetattr,
 	.access		= vbfs_access,
@@ -62,11 +67,6 @@ static struct fuse_operations = {
 	.init		= vbfs_init,
 	.destroy	= vbfs_destroy,
 };
-
-int main(int argc, char **argv)
-{
-	return 0;
-}
 
 static int vbfs_getattr(const char *path, struct stat *stbuf)
 {
@@ -156,7 +156,7 @@ static int vbfs_read(const char *path, char *buf, size_t size, off_t offset,
 }
 
 static int vbfs_write(const char *path, const char *buf, size_t size, off_t offset,
-				struct fuse_file_info *)
+				struct fuse_file_info *fi)
 {
 	log_dbg("vbfs_write\n");
 	return 0;
@@ -189,10 +189,43 @@ static int vbfs_fsync(const char *path, int isdatasync, struct fuse_file_info *f
 static void *vbfs_init(struct fuse_conn_info *conn)
 {
 	log_dbg("vbfs_init\n");
+
+	return NULL;
 }
 
 static void vbfs_destroy(void *data)
 {
 	log_dbg("vbfs_destroy\n");
+
+	log_close();
+}
+
+int main(int argc, char **argv)
+{
+	int ret = 0;
+	int i_argc;
+	char **s_argv;
+
+	if (argc < 3) {
+		fprintf(stderr, "argument error: %s <mountpoint> [options] <device>\n", argv[0]);
+		exit(1);
+	}
+
+	log_init();
+	//mempool_init();
+
+	ret = init_super(argv[argc - 1]);
+	if (ret < 0) {
+		fprintf(stderr, "Invalidate filesystem\n");
+		exit(1);
+	}
+
+	i_argc = argc - 1;
+	s_argv = argv;
+	s_argv[argc - 1] = NULL;
+
+	ret = fuse_main(argc, argv, &vbfs_op, NULL);
+
+	return ret;
 }
 

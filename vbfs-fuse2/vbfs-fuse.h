@@ -2,6 +2,7 @@
 #define __VBFS_FUSE_H_
 
 #include "utils.h"
+#include "../vbfs_fs.h"
 
 #define PATH_SEP '/'
 #define ROOT_INO 0
@@ -18,7 +19,8 @@ typedef enum {
 struct superblock_vbfs {
 	__u32 s_magic;
 	__u32 s_extend_size;
-	__u32 s_free_count;
+	__u32 s_extend_count;
+	__u32 s_file_idx_len;
 	__u32 s_inode_count;
 
 	__u32 bad_count;
@@ -40,7 +42,8 @@ struct superblock_vbfs {
 
 	__u8 uuid[16];
 
-	int superblock_vbfs_dirty;
+	int super_vbfs_dirty;
+	__u32 s_free_count;
 };
 
 struct inode_bitmap_info {
@@ -96,12 +99,13 @@ struct inode_vbfs {
 
 struct dentry_info {
 	__u32 group_no;
-	__u32 used_extend_no;
+	__u32 total_extends;
 
 	__u32 dir_self_count;
 	__u32 dir_total_count;
+
 	__u32 next_extend;
-	__u32 dentry_bitmap_len;
+	__u32 dir_capacity;
 
 	char *dentry_bitmap;
 };
@@ -111,7 +115,7 @@ struct dentry_vbfs {
 	__u32 inode;
 	__u32 file_type;
 
-	char name[NAMELEN];
+	char name[NAME_LEN];
 	struct list_head dentry_list;
 };
 
@@ -158,23 +162,24 @@ struct inode_cache_in_ext {
 	int inode_cache_dirty;
 
 	struct list_head ino_cache_in_ext_list;
-	pthread_mutex_t lock_inode_cache;
+	pthread_mutex_t lock_inode_cache; /* useless */
 };
 
 typedef struct {
 	int fd;
 
-	struct superblock_vbfs *super;
+	struct superblock_vbfs super;
 	pthread_mutex_t lock_super;
 
 	struct extend_bitmap_cache *extend_bitmap_array;
 
 	struct inode_bitmap_cache *inode_bitmap_array;
 
-	struct list_head *inode_cache_list;
+	struct list_head inode_cache_list;
+	pthread_mutex_t lock_inode_cache;
 
 	struct list_head active_inode_list;
-	pthread_mutex_t lock_inode_list;
+	pthread_mutex_t lock_active_inode;
 } vbfs_fuse_context_t;
 
 #endif

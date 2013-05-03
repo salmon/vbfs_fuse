@@ -1,9 +1,9 @@
 #ifndef __VBFS_FORMAT_H_
 #define __VBFS_FORMAT_H_
 
-#include <linux/types.h>
 #include <endian.h>
 #include <byteswap.h>
+#include "vbfs_fs.h"
 
 #if __BYTE_ORDER == __LITTLE_ENDIAN
 #define le16_to_cpu(x)  ((__u16)(x))
@@ -20,14 +20,6 @@
 #define cpu_to_le32(x)  bswap_32(x)
 #define cpu_to_le64(x)  bswap_64(x)
 #endif
-
-#define VBFS_SUPER_MAGIC 0xABCDEF01
-#define VBFS_SUPER_OFFSET 4096
-#define INODE_SIZE 4096
-#define EXTEND_BITMAP_META_SIZE 1024
-#define INODE_BITMAP_META_SIZE 1024
-#define DIR_META_SIZE 1024
-#define NAME_LEN 507
 
 /* Design */
 /* 
@@ -72,6 +64,7 @@ struct vbfs_superblock {
 	__le32 s_extend_size;
 	__le32 s_extend_count;
 	__le32 s_inode_count;
+	__le32 s_file_idx_len;
 
 	__le32 bad_count;
 	__le32 bad_extend_count;

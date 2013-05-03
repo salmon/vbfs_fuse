@@ -16,6 +16,7 @@
 #include <fuse.h>
 #include <endian.h>
 #include <byteswap.h>
+#include <pthread.h>
 
 #include "list.h"
 
@@ -41,12 +42,15 @@ int read_from_disk(int fd, void *buf, __u64 offset, size_t len);
 int write_extend(__u32 extend_no, void *buf);
 int read_extend(__u32 extend_no, void *buf);
 
-inline int bitops_ffs(int i)
+void *Valloc(unsigned int size);
+void *Malloc(unsigned int size);
+
+static inline int bitops_ffs(int i)
 {
 	return ffs(i);
 }
 
-inline int bitops_ffz(int i)
+static inline int bitops_ffz(int i)
 {
 	int j = ~i;
 	return ffs(j);

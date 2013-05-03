@@ -1,4 +1,5 @@
 #include "utils.h"
+#include "vbfs-fuse.h"
 #include "log.h"
 
 extern vbfs_fuse_context_t vbfs_ctx;
@@ -32,7 +33,7 @@ int read_from_disk(int fd, void *buf, __u64 offset, size_t len)
 
 int write_extend(__u32 extend_no, void *buf)
 {
-	size_t len = vbfs_ctx.super->s_extend_size;
+	size_t len = vbfs_ctx.super.s_extend_size;
 	int fd = vbfs_ctx.fd;
 	off64_t offset = (__u64)extend_no * len;
 
@@ -44,7 +45,7 @@ int write_extend(__u32 extend_no, void *buf)
 
 int read_extend(__u32 extend_no, void *buf)
 {
-	size_t len = vbfs_ctx.super->s_extend_size;
+	size_t len = vbfs_ctx.super.s_extend_size;
 	int fd = vbfs_ctx.fd;
 	off64_t offset = (__u64)extend_no * len;
 
@@ -54,3 +55,26 @@ int read_extend(__u32 extend_no, void *buf)
 	return 0;
 }
 
+void *Valloc(unsigned int size)
+{
+	void *p = NULL;
+
+	if ((p = valloc(size)) != NULL) {
+		return p;
+	} else {
+		log_err("valloc error, no memory\n");
+		return NULL;
+	}
+}
+
+void *Malloc(unsigned int size)
+{
+	void *p = NULL;
+
+	if ((p = malloc(size)) != NULL) {
+		return p;
+	} else {
+		log_err("malloc error, no memory\n");
+		return NULL;
+	}
+}
