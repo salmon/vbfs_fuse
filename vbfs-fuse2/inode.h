@@ -29,18 +29,8 @@ __u32 vbfs_inode_lookup_by_name(struct inode_vbfs *v_inode_parent, const char *n
 
 /*
  * according pathname to find inode
- * open/readdir while use this function
+ * open/readdir/opendir... while use this function
  * */
 struct inode_vbfs *vbfs_pathname_to_inode(const char *pathname);
-
-/*
- * static __u32 alloc_extend_bitmap(int *err_no);
- * static __u32 alloc_inode_bitmap(int *err_no);
- * static int alloc_inode(__u32 ino, __u32 p_ino);
- *
- * static int free_extend_bitmap();
- * static int free_inode_bitmap();
- * static 
- * */
 
 #endif

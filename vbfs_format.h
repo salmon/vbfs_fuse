@@ -114,7 +114,7 @@ struct vbfs_inode {
 	__le32 i_mtime;
 
 	__le32 i_extends;
-} __attribute__((packed));
+};
 
 enum {
 	VBFS_FT_UNKOWN,
@@ -127,12 +127,12 @@ struct vbfs_dir_entry {
 	__u32 inode;
 	__u8 file_type;
 	char name[NAME_LEN];
-} __attribute__((packed));
+};
 
 struct dir_metadata {
 	__le32 dir_count;
 	__le32 start_count;
 	__le32 next_extend;
-} __attribute__((packed));
+};
 
 #endif
