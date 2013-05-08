@@ -10,7 +10,7 @@
 #define EXTEND_BITMAP_META_SIZE 1024
 #define INODE_BITMAP_META_SIZE 1024
 #define VBFS_DIR_SIZE 512
-#define VBFS_DIR_META_SIZE 1024
+#define VBFS_DIR_META_SIZE 512
 
 #define NAME_LEN 504
 
@@ -88,7 +88,6 @@ struct inode_bitmap_group_disk {
 	__le32 total_inode;
 	__le32 free_inode;
 	__le32 current_position;
-	__le64 inode_start_offset;
 };
 #define INODE_BITMAP_ST_SIZE sizeof(struct inode_bitmap_group_disk)
 
@@ -103,7 +102,6 @@ struct extend_bitmap_group_disk {
 	__le32 total_extend;
 	__le32 free_extend;
 	__le32 current_position;
-	__le64 extend_start_offset;
 };
 #define EXTEND_BITMAP_ST_SIZE sizeof(struct extend_bitmap_group_disk)
 
@@ -115,14 +113,14 @@ typedef struct {
 
 struct vbfs_inode_disk {
 	__le32 i_ino;
-	__le32 i_pino; /* what's this */
+	__le32 i_pino;
 	__le32 i_mode;
 	__le64 i_size;
 	__le32 i_atime;
 	__le32 i_ctime;
 	__le32 i_mtime;
 
-	__le32 i_extends;
+	__le32 i_extend;
 };
 #define VBFS_INODE_ST_SIZE sizeof(struct vbfs_inode_disk)
 
@@ -148,6 +146,7 @@ struct vbfs_dir_meta_disk {
 
 	__le32 next_extend;
 	__le32 dir_capacity;
+	__le32 bitmap_size;
 } __attribute__((packed));
 #define VBFS_DIR_META_ST_SIZE sizeof(struct vbfs_dir_meta_disk)
 

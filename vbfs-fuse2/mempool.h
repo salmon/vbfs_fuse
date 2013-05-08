@@ -6,7 +6,8 @@
 
 struct mem_area {
 	void *mem;
-	int nref;
+	//int nref;
+	int used;
 
 	struct list_head mem_list;
 };
@@ -16,19 +17,22 @@ struct mempool {
 	int free_num;
 
 	int obj_size;
-	int need_align;
+	int is_align;
 
 	pthread_mutex_t lock_mempool;
 	struct list_head mem_area_list;
 };
 
-int mempool_init(struct mempool *pool, int prealloc_num, int obj_size, int need_align);
-int expand_mempool_size(struct mempool *pool, int expand_num);
-int shrink_mempool_size(struct mempool *pool, int shrink_num);
+//int add_mempool(struct mempool *pool, int prealloc_num, int obj_size, int need_align);
+//int destory_mempool(struct mempool *pool);
 
-int mempool_alloc(struct mempool *mempool);
-int mempool_free(struct mempool *mempool);
+//int expand_mempool_size(struct mempool *pool, int expand_num);
+//int shrink_mempool_size(struct mempool *pool, int shrink_num);
 
-void mempool_status(struct mempool *mempool);
+void *mp_malloc(unsigned int size);
+void *mp_valloc(unsigned int size);
+void mp_free(void *p);
+
+void mempool_status(void);
 
 #endif

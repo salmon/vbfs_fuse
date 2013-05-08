@@ -78,3 +78,10 @@ void *Malloc(unsigned int size)
 		return NULL;
 	}
 }
+
+static int find_next_zero(int word, int start)
+{
+	word >>= start;
+
+	return bitops_ffz(word) + start;
+}

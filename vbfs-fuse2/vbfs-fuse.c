@@ -219,7 +219,6 @@ int main(int argc, char **argv)
 	}
 
 	log_init();
-	//mempool_init();
 
 	ret = init_super(argv[argc - 1]);
 	if (ret < 0) {

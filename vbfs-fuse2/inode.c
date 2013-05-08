@@ -1,7 +1,15 @@
 #include "utils.h"
+#include "vbfs-fuse.h"
+
+extern vbfs_fuse_context_t vbfs_ctx;
 
 static int alloc_extend_bitmap(__u32 *extend_no)
 {
+	__u32 extend_off_t = 0;
+
+	extend_off_t = vbfs_ctx.super.extend_bitmap_current;
+
+
 	return 0;
 }
 
