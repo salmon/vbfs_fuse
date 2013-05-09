@@ -17,6 +17,7 @@ static void init_vbfs_ctx(int fd)
 	pthread_mutex_init(&vbfs_ctx.lock_active_inode, NULL);
 
 	vbfs_ctx.fd = fd;
+	vbfs_ctx.inode_cache_extend_cnt = 0;
 }
 
 static int load_super(void)
@@ -141,11 +142,16 @@ int init_super(const char *dev_name)
 	/* bad extend init */
 	init_bad_extend();
 
-	/* calculate free extend */
-	/* */
+	vbfs_ctx.super.inode_offset = vbfs_ctx.super.extend_bitmap_offset
+					+ vbfs_ctx.super.extend_bitmap_count;
+	vbfs_ctx.super.inode_extends = ((__u64)vbfs_ctx.super.s_inode_count * INODE_SIZE)
+					/ vbfs_ctx.super.s_extend_size;
 
 	init_inode_bitmap();
 	init_extend_bitmap();
+
+	/* calculate free extend */
+	/* */
 
 	return 0;
 

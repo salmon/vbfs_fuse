@@ -31,7 +31,7 @@ struct mempool {
 
 void *mp_malloc(unsigned int size);
 void *mp_valloc(unsigned int size);
-void mp_free(void *p);
+void mp_free(void *p, unsigned int size);
 
 void mempool_status(void);
 

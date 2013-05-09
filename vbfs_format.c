@@ -201,6 +201,19 @@ __u32 calc_div(__u32 dividend, __u32 divisor)
 	return result;
 }
 
+__u32 calc_div_64(__u64 dividend, __u32 divisor)
+{
+	__u32 result = 0;
+
+	if (dividend % divisor) {
+		result = dividend / divisor + 1;
+	} else {
+		result = dividend / divisor;
+	}
+
+	return result;
+}
+
 static int vbfs_prepare_superblock()
 {
 	__u32 extend_size = 0;
@@ -234,7 +247,7 @@ static int vbfs_prepare_superblock()
 	printf("bad use %u extends\n", bad_extend_count);
 
 	inode_count = calc_div(extend_count, vbfs_params.inode_ratio);
-	vbfs_params.inode_extend_cnt = calc_div(inode_count * INODE_SIZE, extend_size);
+	vbfs_params.inode_extend_cnt = calc_div_64((__u64)inode_count * INODE_SIZE, extend_size);
 	inode_count = vbfs_params.inode_extend_cnt * (extend_size / INODE_SIZE);
 
 	printf("inode total num is %u, use %u extends\n",
@@ -294,33 +307,7 @@ static int vbfs_prepare_superblock()
 	return 0;
 }
 
-/* 
- * 0 -> not found
- * */
-__u32 get_first_s_bit(char *bitmap, int bm_size)
-{
-	int val;
-        __u32 *bm = 0;
-	int i = 0, pos = 0;
-
-        bm = (__u32 *) bitmap;
-
-	for (i = 0; i < bm_size / 32; i ++) {
-        	val = *bm;
-
-		if (ffs(val) == 0) {
-			bm ++;
-			pos += 32;
-		} else {
-			pos = pos + ffs(val) - 1;
-			return pos;
-		}
-	}
-
-	return bm_size;
-}
-
-__u32 get_val(__u32 bit)
+static __u32 get_val(__u32 bit)
 {
 	__u32 val = 0;
 	__u32 tmp = 0;
@@ -356,7 +343,7 @@ __u32 get_val(__u32 bit)
 	return ~val;
 }
 
-static void init_bitmap(char *bitmap, __u32 bitmap_size, __u32 total_inode)
+static void init_bitmap(char *bitmap, __u32 bitmap_bits, __u32 total_inode)
 {
 	__u32 val = 0;
 	__u32 m = 0, n = 0;
@@ -364,14 +351,14 @@ static void init_bitmap(char *bitmap, __u32 bitmap_size, __u32 total_inode)
 	__u32 remain = 0;
 	__u32 *bm = 0;
 
-	assert(! (total_inode > bitmap_size));
-	assert(! (bitmap_size % 32));
+	assert(! (total_inode > bitmap_bits));
+	assert(! (bitmap_bits % 32));
 
-	if (bitmap_size == total_inode)
+	if (bitmap_bits == total_inode)
 		return;
 
 	if (total_inode == 0) {
-		memset(bitmap, 0xff, bitmap_size / 8);
+		memset(bitmap, 0xff, bitmap_bits / 8);
 		return;
 	}
 
@@ -385,9 +372,9 @@ static void init_bitmap(char *bitmap, __u32 bitmap_size, __u32 total_inode)
 	val |= get_val(m);
 	*bm = cpu_to_le32(val);
 
-	remain = (bitmap_size - total_inode) / 32;
+	remain = (bitmap_bits - total_inode) / 32;
 	if (remain) {
-		pos = bitmap + bitmap_size / 8 - remain * 4;
+		pos = bitmap + bitmap_bits / 8 - remain * 4;
 		memset(pos, 0xff, remain * 4);
 	}
 }
@@ -437,7 +424,7 @@ static void vbfs_inode_bm_prepare(__u32 group_no, __u32 total_inodes, char *inod
 	*/
 	memset(inode_bm_extend, 0, extend_size);
 
-	bitmap_size = extend_size - INODE_BITMAP_META_SIZE;
+	bitmap_size = (extend_size - INODE_BITMAP_META_SIZE) * 8;
 	bitmap_region = inode_bm_extend + INODE_BITMAP_META_SIZE;
 
 	inode_meta.free_inode = total_inodes;
@@ -482,7 +469,7 @@ static void vbfs_extend_bm_prepare(__u32 group_no, __u32 total_extends, char *ex
 	memset(&extend_bm_dk, 0, sizeof(extend_bm_dk));
 	memset(extend_bm_extend, 0, extend_size);
 
-	bitmap_size = extend_size - EXTEND_BITMAP_META_SIZE;
+	bitmap_size = (extend_size - EXTEND_BITMAP_META_SIZE) * 8;
 	bitmap_region = extend_bm_extend + EXTEND_BITMAP_META_SIZE;
 
 	extend_meta.free_extend = total_extends;
@@ -743,8 +730,10 @@ static int write_inode_bitmap()
 	inodes_bm_capacity = (extend_size - INODE_BITMAP_META_SIZE) * 8;
 
 	for (i = 0; i < vbfs_superblk.inode_bitmap_count; i ++) {
-		if (inodes_total_cnt > inodes_bm_capacity * (i + 1)) {
-			inodes_cnt = inodes_total_cnt - inodes_bm_capacity * (i + 1);
+		if (inodes_total_cnt > inodes_bm_capacity * i) {
+			inodes_cnt = inodes_total_cnt - inodes_bm_capacity * i;
+			if (inodes_cnt > inodes_bm_capacity)
+				inodes_cnt = inodes_bm_capacity;
 		} else {
 			inodes_cnt = 0;
 		}
@@ -792,8 +781,10 @@ static int write_extend_bitmap()
 	extends_bm_capacity = (extend_size - EXTEND_BITMAP_META_SIZE) * 8;
 
 	for (i = 0; i < vbfs_superblk.extend_bitmap_count; i ++) {
-		if (extends_total_cnt > extends_bm_capacity * (i + 1)) {
-			extends_cnt = extends_total_cnt - extends_bm_capacity * (i + 1);
+		if (extends_total_cnt > extends_bm_capacity * i) {
+			extends_cnt = extends_total_cnt - extends_bm_capacity * i;
+			if (extends_cnt > extends_bm_capacity)
+				extends_cnt = extends_bm_capacity;
 		} else {
 			extends_cnt = 0;
 		}

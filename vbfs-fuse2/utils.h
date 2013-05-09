@@ -17,6 +17,7 @@
 #include <endian.h>
 #include <byteswap.h>
 #include <pthread.h>
+#include <assert.h>
 
 #include "list.h"
 
@@ -55,5 +56,7 @@ static inline int bitops_ffz(int i)
 	int j = ~i;
 	return ffs(j);
 }
+
+int check_ffs(char *bitmap, __u32 bitmap_bits, __u32 bit);
 
 #endif

@@ -79,9 +79,21 @@ void *Malloc(unsigned int size)
 	}
 }
 
-static int find_next_zero(int word, int start)
+int check_ffs(char *bitmap, __u32 bitmap_bits, __u32 bit)
 {
-	word >>= start;
+	__u32 val = 0;
+	__u32 *bm = NULL;
+	__u32 offset = 0;
 
-	return bitops_ffz(word) + start;
+	assert(! (bitmap_bits % 32));
+	if (bit > bitmap_bits) {
+		return 0;
+	}
+
+	bm = (__u32 *) bitmap;
+	offset = bit / 32;
+
+	val = le32_to_cpu(*(bm + offset));
+
+	return val | 1 << (bit % 32);
 }

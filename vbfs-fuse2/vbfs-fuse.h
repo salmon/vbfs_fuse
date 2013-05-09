@@ -42,6 +42,9 @@ struct superblock_vbfs {
 
 	__u8 uuid[16];
 
+	__u32 inode_offset;
+	__u32 inode_extends;
+
 	int super_vbfs_dirty;
 	__u32 s_free_count;
 };
@@ -81,8 +84,8 @@ struct inode_vbfs {
 
 	__u32 i_extend;
 
-	/* store inode metadata */
-	char *inode_data;
+	/* store inode first extend */
+	char *inode_first_ext;
 	int inode_data_dirty;
 #if 0
 	/* cache write data */
@@ -93,7 +96,7 @@ struct inode_vbfs {
 	struct list_head data_buf_list;
 
 	int nref;
-	struct list_head inode;
+	struct list_head inode_l;
 	pthread_mutex_t lock_inode;
 };
 
@@ -154,15 +157,15 @@ struct inode_bitmap_cache {
 
 struct inode_cache_in_ext {
 	__u32 extend_no; /* record current the extend of inodes cached */
-	int cache_no; /* according this to swap out */
+	int cache_no; /* according this to swap out, useless ? */
 
 	char *content;
 
-	int cache_status; /* 0->(not ready) 1->(ready) */
+	int cache_status; /* 0->(not ready) 1->(ready), useless ? */
 	int inode_cache_dirty;
 
 	struct list_head ino_cache_in_ext_list;
-	pthread_mutex_t lock_inode_cache; /* useless */
+	pthread_mutex_t lock_inode_cache; /* useless ? */
 };
 
 typedef struct {
@@ -175,6 +178,7 @@ typedef struct {
 
 	struct inode_bitmap_cache *inode_bitmap_array;
 
+	int inode_cache_extend_cnt;
 	struct list_head inode_cache_list;
 	pthread_mutex_t lock_inode_cache;
 

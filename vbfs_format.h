@@ -131,7 +131,7 @@ struct dir_metadata {
 
 	__u32 next_extend;
 	__u32 dir_capacity;
-	__u32 bitmap_size;
+	__u32 bitmap_size; /* 512 bytes is a unit */
 };
 
 #endif
