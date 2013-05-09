@@ -116,13 +116,6 @@ struct vbfs_inode {
 	__u32 i_extend;
 };
 
-enum {
-	VBFS_FT_UNKOWN,
-	VBFS_FT_REG_FILE,
-	VBFS_FT_DIR,
-	VBFS_FT_MAX
-};
-
 struct vbfs_dir_entry {
 	__u32 inode;
 	__u32 file_type;
