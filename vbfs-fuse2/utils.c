@@ -97,3 +97,66 @@ int check_ffs(char *bitmap, __u32 bitmap_bits, __u32 bit)
 
 	return val | 1 << (bit % 32);
 }
+
+__u32 bitops_next_pos(char *bitmap, __u32 bitmap_bits, __u32 start_ops)
+{
+	__u32 offset = 0;
+	__u32 val;
+	__u32 *bm = NULL;
+	__u32 bitmap_size = 0;
+	int n = 0, i = 0, len = 0;
+	int ret = 0;
+
+	assert(! (bitmap_bits % 32));
+
+	bitmap_size = bitmap_bits / 32;
+	n = offset % 32;
+
+	bm = (__u32 *) bitmap;
+	offset = start_ops / 32;
+	len = bitmap_size - offset;
+	if (len <= 0)
+		return 0;
+
+	val = *(bm + offset) >> n;
+
+	for (i = 0; i < len; i ++) {
+		ret = bitops_ffs(val);
+		if (ret) {
+			return offset * 8 + n + ret;
+		} else {
+			val = *++bm;
+		}
+	}
+
+	return 0;
+}
+
+char *pathname_str_sep(char **pathname, const char delim)
+{
+	char *sbegin = *pathname;
+	char *end;
+	char *sc;
+	int found = 0;
+
+	if (sbegin == NULL)
+		return NULL;
+
+	for (sc = sbegin; *sc != '\0'; ++sc) {
+		if (*sc == delim) {
+			found = 1;
+			end = sc;
+			break;
+		}
+	}
+
+	if (! found)
+		end = NULL;
+
+	if (end)
+		*end++ = '\0';
+
+	*pathname = end;
+
+	return sbegin;
+}

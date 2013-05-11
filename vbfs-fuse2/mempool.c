@@ -138,6 +138,7 @@ static void *mempool_alloc(struct mempool *pool)
 				mem_area->used = 1;
 				p = mem_area->mem;
 				is_alloc = 1;
+				break;
 			}
 		}
 
@@ -198,6 +199,7 @@ void *mp_valloc(unsigned int size)
 {
 	int i;
 	char *p = NULL;
+	int found = 0;
 
 	pthread_mutex_lock(&pool_global_lock);
 	for (i = 0; i < nr_pools; i ++) {
@@ -205,11 +207,14 @@ void *mp_valloc(unsigned int size)
 			continue;
 		}
 		if (mp[i].obj_size == size) {
+			found = 1;
 			break;
 		}
 	}
-	nr_pools ++;
-	add_mempool_unlocked(&mp[nr_pools], PRE_ALLOC_NUM, size, 1);
+	if (found == 0) {
+		add_mempool_unlocked(&mp[nr_pools], PRE_ALLOC_NUM, size, 1);
+		nr_pools ++;
+	}
 	pthread_mutex_unlock(&pool_global_lock);
 
 	p = mempool_alloc(&mp[i]);
@@ -221,6 +226,7 @@ void *mp_malloc(unsigned int size)
 {
 	int i;
 	char *p = NULL;
+	int found = 0;
 
 	pthread_mutex_lock(&pool_global_lock);
 	for (i = 0; i < nr_pools; i ++) {
@@ -228,11 +234,14 @@ void *mp_malloc(unsigned int size)
 			continue;
 		}
 		if (mp[i].obj_size == size) {
+			found = 1;
 			break;
 		}
 	}
-	nr_pools ++;
-	add_mempool_unlocked(&mp[nr_pools], PRE_ALLOC_NUM, size, 0);
+	if (found == 0) {
+		add_mempool_unlocked(&mp[nr_pools], PRE_ALLOC_NUM, size, 0);
+		nr_pools ++;
+	}
 	pthread_mutex_unlock(&pool_global_lock);
 
 	p = mempool_alloc(&mp[i]);

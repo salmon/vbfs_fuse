@@ -4,205 +4,248 @@
 #include "log.h"
 #include "mempool.h"
 #include "super.h"
+#include "inode.h"
+#include "dir.h"
 
 vbfs_fuse_context_t vbfs_ctx;
 
-static int vbfs_getattr(const char *path, struct stat *stbuf);
-static int vbfs_fgetattr(const char *path, struct stat *stbuf,
+static int vbfs_fuse_getattr(const char *path, struct stat *stbuf);
+static int vbfs_fuse_fgetattr(const char *path, struct stat *stbuf,
 				struct fuse_file_info *fi);
-static int vbfs_access(const char *path, int mode);
+static int vbfs_fuse_access(const char *path, int mode);
 
-static int vbfs_opendir(const char *path, struct fuse_file_info *fi);
-static int vbfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
+static int vbfs_fuse_opendir(const char *path, struct fuse_file_info *fi);
+static int vbfs_fuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 				off_t offset, struct fuse_file_info *fi);
-static int vbfs_releasedir(const char *path, struct fuse_file_info *fi);
-static int vbfs_mkdir(const char *path, mode_t mode);
-static int vbfs_rmdir(const char *path);
+static int vbfs_fuse_releasedir(const char *path, struct fuse_file_info *fi);
+static int vbfs_fuse_mkdir(const char *path, mode_t mode);
+static int vbfs_fuse_rmdir(const char *path);
 
-static int vbfs_rename(const char *from, const char *to);
-static int vbfs_truncate(const char *path, off_t size);
-static int vbfs_ftruncate(const char *path, off_t size, struct fuse_file_info *fi);
+static int vbfs_fuse_rename(const char *from, const char *to);
+static int vbfs_fuse_truncate(const char *path, off_t size);
+static int vbfs_fuse_ftruncate(const char *path, off_t size, struct fuse_file_info *fi);
 
-static int vbfs_create(const char *path, mode_t mode, struct fuse_file_info *fi);
-static int vbfs_open(const char *path, struct fuse_file_info *fi);
-static int vbfs_read(const char *path, char *buf, size_t size, off_t offset,
+static int vbfs_fuse_create(const char *path, mode_t mode, struct fuse_file_info *fi);
+static int vbfs_fuse_open(const char *path, struct fuse_file_info *fi);
+static int vbfs_fuse_read(const char *path, char *buf, size_t size, off_t offset,
 				struct fuse_file_info *fi);
-static int vbfs_write(const char *path, const char *buf, size_t size, off_t offset,
+static int vbfs_fuse_write(const char *path, const char *buf, size_t size, off_t offset,
 				struct fuse_file_info *);
-static int vbfs_statfs(const char *path, struct statvfs *stbuf);
-static int vbfs_flush(const char *path, struct fuse_file_info *fi);
-static int vbfs_release(const char *path, struct fuse_file_info *fi);
-static int vbfs_fsync(const char *path, int isdatasync, struct fuse_file_info *fi);
+static int vbfs_fuse_statfs(const char *path, struct statvfs *stbuf);
+static int vbfs_fuse_flush(const char *path, struct fuse_file_info *fi);
+static int vbfs_fuse_release(const char *path, struct fuse_file_info *fi);
+static int vbfs_fuse_fsync(const char *path, int isdatasync, struct fuse_file_info *fi);
 
-static void *vbfs_init(struct fuse_conn_info *conn);
-static void vbfs_destroy(void *data);
+static void *vbfs_fuse_init(struct fuse_conn_info *conn);
+static void vbfs_fuse_destroy(void *data);
 
 static struct fuse_operations vbfs_op = {
-	.getattr	= vbfs_getattr,
-	.fgetattr	= vbfs_fgetattr,
-	.access		= vbfs_access,
+	.getattr	= vbfs_fuse_getattr,
+	.fgetattr	= vbfs_fuse_fgetattr,
+	.access		= vbfs_fuse_access,
 
-	.opendir	= vbfs_opendir,
-	.readdir	= vbfs_readdir,
-	.releasedir	= vbfs_releasedir,
-	.mkdir		= vbfs_mkdir,
-	.rmdir		= vbfs_rmdir,
+	.opendir	= vbfs_fuse_opendir,
+	.readdir	= vbfs_fuse_readdir,
+	.releasedir	= vbfs_fuse_releasedir,
+	.mkdir		= vbfs_fuse_mkdir,
+	.rmdir		= vbfs_fuse_rmdir,
 
-	.rename		= vbfs_rename,
-	.truncate	= vbfs_truncate,
-	.ftruncate	= vbfs_ftruncate,
+	.rename		= vbfs_fuse_rename,
+	.truncate	= vbfs_fuse_truncate,
+	.ftruncate	= vbfs_fuse_ftruncate,
 
-	.create		= vbfs_create,
-	.open		= vbfs_open,
-	.read		= vbfs_read,
-	//.read_buf	= vbfs_read_buf,
-	.write		= vbfs_write,
-	//.write_buf	= vbfs_write_buf,
+	.create		= vbfs_fuse_create,
+	.open		= vbfs_fuse_open,
+	.read		= vbfs_fuse_read,
+	//.read_buf	= vbfs_fuse_read_buf,
+	.write		= vbfs_fuse_write,
+	//.write_buf	= vbfs_fuse_write_buf,
 
-	.statfs		= vbfs_statfs,
-	.flush		= vbfs_flush,
-	.release	= vbfs_release,
-	.fsync		= vbfs_fsync,
+	.statfs		= vbfs_fuse_statfs,
+	.flush		= vbfs_fuse_flush,
+	.release	= vbfs_fuse_release,
+	.fsync		= vbfs_fuse_fsync,
 
-	.init		= vbfs_init,
-	.destroy	= vbfs_destroy,
+	.init		= vbfs_fuse_init,
+	.destroy	= vbfs_fuse_destroy,
 };
 
-static int vbfs_getattr(const char *path, struct stat *stbuf)
+static int vbfs_fuse_getattr(const char *path, struct stat *stbuf)
 {
-	log_dbg("vbfs_getattr\n");
+	int ret = 0;
+	struct inode_vbfs *inode_v = NULL;
+
+	log_dbg("vbfs_fuse_getattr %s\n", path);
+	memset(stbuf, 0, sizeof(struct stat));
+
+	inode_v = vbfs_pathname_to_inode(path, &ret);
+	if (ret) {
+		return ret;
+	}
+
+	stbuf->st_ino = inode_v->i_ino;
+	if (inode_v->i_mode == VBFS_FT_DIR) {
+		stbuf->st_mode = S_IFDIR | 0777;
+	} else if (inode_v->i_mode == VBFS_FT_REG_FILE) {
+		stbuf->st_mode = S_IFREG | 0777;
+	}
+	stbuf->st_atime = inode_v->i_atime;
+	stbuf->st_mtime = inode_v->i_mtime;
+	stbuf->st_ctime = inode_v->i_ctime;
+
+	vbfs_inode_close(inode_v);
 
 	return 0;
 }
 
-static int vbfs_fgetattr(const char *path, struct stat *stbuf,
+static int vbfs_fuse_fgetattr(const char *path, struct stat *stbuf,
 				struct fuse_file_info *fi)
 {
-	log_dbg("vbfs_fgetattr\n");
+	log_dbg("vbfs_fuse_fgetattr\n");
 
 	return 0;
 }
 
-static int vbfs_access(const char *path, int mode)
+static int vbfs_fuse_access(const char *path, int mode)
 {
-	log_dbg("vbfs_access\n");
+	log_dbg("vbfs_fuse_access\n");
 
 	return 0;
 }
 
-static int vbfs_opendir(const char *path, struct fuse_file_info *fi)
+static int vbfs_fuse_opendir(const char *path, struct fuse_file_info *fi)
 {
-	log_dbg("vbfs_opendir\n");
+	log_dbg("vbfs_fuse_opendir\n");
 
 	return 0;
 }
 
-static int vbfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
+static int vbfs_fuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 				off_t offset, struct fuse_file_info *fi)
 {
-	log_dbg("vbfs_readdir\n");
+	int ret = 0;
+	struct inode_vbfs *inode_v = NULL;
+	off_t pos = 0;
+
+	log_dbg("vbfs_fuse_readdir %s\n", path);
+	inode_v = vbfs_pathname_to_inode(path, &ret);
+	if (ret) {
+		return ret;
+	}
+
+	ret = vbfs_readdir(inode_v, &pos, filler, buf);
+	if (ret) {
+		return ret;
+	}
+
+	vbfs_inode_update_times(inode_v, UPDATE_ATIME);
+
+	ret = vbfs_inode_close(inode_v);
+	if (ret) {
+		return ret;
+	}
 
 	return 0;
 }
 
-static int vbfs_releasedir(const char *path, struct fuse_file_info *fi)
+static int vbfs_fuse_releasedir(const char *path, struct fuse_file_info *fi)
 {
-	log_dbg("vbfs_releasedir\n");
+	log_dbg("vbfs_fuse_releasedir\n");
 
 	return 0;
 }
 
-static int vbfs_mkdir(const char *path, mode_t mode)
+static int vbfs_fuse_mkdir(const char *path, mode_t mode)
 {
-	log_dbg("vbfs_mkdir\n");
+	log_dbg("vbfs_fuse_mkdir\n");
 
 	return 0;
 }
 
-static int vbfs_rmdir(const char *path)
+static int vbfs_fuse_rmdir(const char *path)
 {
-	log_dbg("vbfs_rmdir\n");
+	log_dbg("vbfs_fuse_rmdir\n");
 	return 0;
 }
 
-static int vbfs_rename(const char *from, const char *to)
+static int vbfs_fuse_rename(const char *from, const char *to)
 {
-	log_dbg("vbfs_rename\n");
+	log_dbg("vbfs_fuse_rename\n");
 	return 0;
 }
 
-static int vbfs_truncate(const char *path, off_t size)
+static int vbfs_fuse_truncate(const char *path, off_t size)
 {
-	log_dbg("vbfs_truncate\n");
+	log_dbg("vbfs_fuse_truncate\n");
 	return 0;
 }
 
-static int vbfs_ftruncate(const char *path, off_t size, struct fuse_file_info *fi)
+static int vbfs_fuse_ftruncate(const char *path, off_t size, struct fuse_file_info *fi)
 {
-	log_dbg("vbfs_ftruncate\n");
+	log_dbg("vbfs_fuse_ftruncate\n");
 	return 0;
 }
 
-static int vbfs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
+static int vbfs_fuse_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 {
-	log_dbg("vbfs_create\n");
+	log_dbg("vbfs_fuse_create\n");
 	return 0;
 }
 
-static int vbfs_open(const char *path, struct fuse_file_info *fi)
+static int vbfs_fuse_open(const char *path, struct fuse_file_info *fi)
 {
-	log_dbg("vbfs_open\n");
+	log_dbg("vbfs_fuse_open\n");
 	return 0;
 }
 
-static int vbfs_read(const char *path, char *buf, size_t size, off_t offset,
+static int vbfs_fuse_read(const char *path, char *buf, size_t size, off_t offset,
 				struct fuse_file_info *fi)
 {
-	log_dbg("vbfs_read\n");
+	log_dbg("vbfs_fuse_read\n");
 	return 0;
 }
 
-static int vbfs_write(const char *path, const char *buf, size_t size, off_t offset,
+static int vbfs_fuse_write(const char *path, const char *buf, size_t size, off_t offset,
 				struct fuse_file_info *fi)
 {
-	log_dbg("vbfs_write\n");
+	log_dbg("vbfs_fuse_write\n");
 	return 0;
 }
 
-static int vbfs_statfs(const char *path, struct statvfs *stbuf)
+static int vbfs_fuse_statfs(const char *path, struct statvfs *stbuf)
 {
-	log_dbg("vbfs_statfs\n");
+	log_dbg("vbfs_fuse_statfs\n");
 	return 0;
 }
 
-static int vbfs_flush(const char *path, struct fuse_file_info *fi)
+static int vbfs_fuse_flush(const char *path, struct fuse_file_info *fi)
 {
-	log_dbg("vbfs_flush\n");
+	log_dbg("vbfs_fuse_flush\n");
 	return 0;
 }
 
-static int vbfs_release(const char *path, struct fuse_file_info *fi)
+static int vbfs_fuse_release(const char *path, struct fuse_file_info *fi)
 {
-	log_dbg("vbfs_release\n");
+	log_dbg("vbfs_fuse_release\n");
 	return 0;
 }
 
-static int vbfs_fsync(const char *path, int isdatasync, struct fuse_file_info *fi)
+static int vbfs_fuse_fsync(const char *path, int isdatasync, struct fuse_file_info *fi)
 {
-	log_dbg("vbfs_fsync\n");
+	log_dbg("vbfs_fuse_fsync\n");
 	return 0;
 }
 
-static void *vbfs_init(struct fuse_conn_info *conn)
+static void *vbfs_fuse_init(struct fuse_conn_info *conn)
 {
-	log_dbg("vbfs_init\n");
+	log_dbg("vbfs_fuse_init\n");
 
 	return NULL;
 }
 
-static void vbfs_destroy(void *data)
+static void vbfs_fuse_destroy(void *data)
 {
-	log_dbg("vbfs_destroy\n");
+	log_dbg("vbfs_fuse_destroy\n");
 
 	log_close();
 }

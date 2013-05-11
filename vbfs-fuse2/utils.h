@@ -46,17 +46,43 @@ int read_extend(__u32 extend_no, void *buf);
 void *Valloc(unsigned int size);
 void *Malloc(unsigned int size);
 
-static inline int bitops_ffs(int i)
+static inline int bitops_ffs(__u32 word)
 {
-	return ffs(i);
+	int r = 0;
+
+	if (!(word & 0xffff)) {
+		word >>= 16;
+		r += 16;
+	}
+	if (!(word & 0xff)) {
+		word >>= 8;
+		r += 8;
+	}
+	if (!(word & 0xf)) {
+		word >>= 4;
+		r += 4;
+	}
+	if (!(word & 3)) {
+		word >>= 2;
+		r += 2;
+	}
+	if (!(word & 1)) {
+		word >>= 1;
+		r += 1;
+	}
+
+	return (r + 1) % 32;
 }
 
-static inline int bitops_ffz(int i)
+static inline int bitops_ffz(__u32 word)
 {
-	int j = ~i;
-	return ffs(j);
+	return bitops_ffs(~word);
 }
 
 int check_ffs(char *bitmap, __u32 bitmap_bits, __u32 bit);
+
+char *pathname_str_sep(char **pathname, const char delim);
+
+__u32 bitops_next_pos(char *bitmap, __u32 bitmap_bits, __u32 start_ops);
 
 #endif

@@ -1,6 +1,7 @@
 #include "vbfs-fuse.h"
 #include "super.h"
 #include "log.h"
+#include "mempool.h"
 
 extern vbfs_fuse_context_t vbfs_ctx;
 static vbfs_superblock_dk_t *vbfs_superblock_disk;
@@ -60,11 +61,51 @@ static int init_bad_extend(void)
 	return 0;
 }
 
+static void load_inode_bitmap(inode_bitmap_group_dk_t *bm_disk, struct inode_bitmap_info *bm_info)
+{
+	bm_info->group_no = le32_to_cpu(bm_disk->inode_bm_gp.group_no);
+	bm_info->total_inode = le32_to_cpu(bm_disk->inode_bm_gp.total_inode);
+	bm_info->free_inode = le32_to_cpu(bm_disk->inode_bm_gp.free_inode);
+	bm_info->current_position = le32_to_cpu(bm_disk->inode_bm_gp.current_position);
+}
+
+static int init_inode_bm_info(int group_no, struct inode_bitmap_info *bm_info)
+{
+	__u32 extend_size = 0;
+	__u32 extend_no = 0;
+	char *extend_buf = NULL;
+	char *pos = NULL;
+
+	extend_size = vbfs_ctx.super.s_extend_size;
+	extend_no = vbfs_ctx.super.inode_bitmap_offset + group_no;
+
+	if ((extend_buf = mp_valloc(extend_size)) == NULL) {
+		return -1;
+	}
+
+	if (read_extend(extend_no, extend_buf)) {
+		mp_free(bm_info, extend_size);
+		return -1;
+	}
+
+	pos = extend_buf;
+	load_inode_bitmap((inode_bitmap_group_dk_t *) pos, bm_info);
+
+	if (bm_info->group_no != group_no) {
+		log_err("inode bitmap invaild, vbfs filesystem corrupt\n");
+		return -1;
+	}
+
+	mp_free(bm_info, extend_size);
+
+	return 0;
+}
+
 static int init_inode_bitmap(void)
 {
 	__u32 count;
 	__u32 i;
-	struct inode_bitmap_cache *tmp;
+	struct inode_bitmap_cache *tmp = NULL;
 
 	count = vbfs_ctx.super.inode_bitmap_count;
 	vbfs_ctx.inode_bitmap_array =
@@ -78,6 +119,9 @@ static int init_inode_bitmap(void)
 		tmp->extend_no = 0;
 		tmp->content = NULL;
 		memset(&tmp->inode_bm_info, 0, sizeof(struct inode_bitmap_info));
+		if (init_inode_bm_info(i, &tmp->inode_bm_info)) {
+			return -1;
+		}
 		tmp->inode_bitmap_region = NULL;
 		tmp->cache_status = 0;
 		tmp->inode_bitmap_dirty = 0;
@@ -89,20 +133,64 @@ static int init_inode_bitmap(void)
 	return 0;
 }
 
+static void load_extend_bitmap(extend_bitmap_group_dk_t *bm_disk, struct extend_bitmap_info *bm_info)
+{
+	bm_info->group_no = le32_to_cpu(bm_disk->extend_bm_gp.group_no);
+	bm_info->total_extend = le32_to_cpu(bm_disk->extend_bm_gp.total_extend);
+	bm_info->free_extend = le32_to_cpu(bm_disk->extend_bm_gp.free_extend);
+	bm_info->current_position = le32_to_cpu(bm_disk->extend_bm_gp.current_position);
+}
+
+static int init_extend_bm_info(int group_no, struct extend_bitmap_info *bm_info)
+{
+	__u32 extend_size = 0;
+	__u32 extend_no = 0;
+	char *extend_buf = NULL;
+	char *pos = NULL;
+
+	extend_size = vbfs_ctx.super.s_extend_size;
+	extend_no = vbfs_ctx.super.extend_bitmap_offset + group_no;
+
+	if ((extend_buf = mp_valloc(extend_size)) == NULL) {
+		return -1;
+	}
+
+	if (read_extend(extend_no, extend_buf)) {
+		mp_free(bm_info, extend_size);
+		return -1;
+	}
+
+	pos = extend_buf;
+	load_extend_bitmap((extend_bitmap_group_dk_t *) pos, bm_info);
+
+	if (bm_info->group_no != group_no) {
+		log_err("extend bitmap invaild, vbfs filesystem corrupt\n");
+		return -1;
+	}
+
+	mp_free(bm_info, extend_size);
+
+	return 0;
+}
+
 static int init_extend_bitmap(void)
 {
 	__u32 count;
 	__u32 i;
-	struct extend_bitmap_cache *tmp;
+	struct extend_bitmap_cache *tmp = NULL;
 
 	count = vbfs_ctx.super.extend_bitmap_count;
 	vbfs_ctx.extend_bitmap_array =
 		Malloc(count * sizeof(struct extend_bitmap_cache));
 
+	tmp = vbfs_ctx.extend_bitmap_array;
 	for (i = 0; i < count; i ++) {
 		tmp->extend_no = 0;
 		tmp->content = NULL;
 		memset(&tmp->extend_bm_info, 0, sizeof(struct extend_bitmap_info));
+		if (init_extend_bm_info(i, &tmp->extend_bm_info)) {
+			return -1;
+		}
 		tmp->extend_bitmap_region = NULL;
 		tmp->cache_status = 0;
 		tmp->extend_bitmap_dirty = 0;
@@ -139,16 +227,20 @@ int init_super(const char *dev_name)
 	vbfs_ctx.super.s_state = 1;
 	vbfs_ctx.super.super_vbfs_dirty = 1;
 
-	/* bad extend init */
-	init_bad_extend();
-
 	vbfs_ctx.super.inode_offset = vbfs_ctx.super.extend_bitmap_offset
 					+ vbfs_ctx.super.extend_bitmap_count;
 	vbfs_ctx.super.inode_extends = ((__u64)vbfs_ctx.super.s_inode_count * INODE_SIZE)
 					/ vbfs_ctx.super.s_extend_size;
 
-	init_inode_bitmap();
-	init_extend_bitmap();
+	/* bad extend init */
+	if (init_bad_extend())
+		goto err;
+
+	if (init_inode_bitmap())
+		goto err;
+
+	if (init_extend_bitmap())
+		goto err;
 
 	/* calculate free extend */
 	/* */

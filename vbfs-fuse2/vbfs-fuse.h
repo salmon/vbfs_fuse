@@ -52,14 +52,14 @@ struct superblock_vbfs {
 struct inode_bitmap_info {
 	__u32 group_no;
 	__u32 total_inode;
-	__u32 free_inodes;
+	__u32 free_inode;
 	__u32 current_position;
 };
 
 struct extend_bitmap_info {
 	__u32 group_no;
 	__u32 total_extend;
-	__u32 free_extends;
+	__u32 free_extend;
 	__u32 current_position;
 };
 
@@ -86,7 +86,9 @@ struct inode_vbfs {
 
 	/* store inode first extend */
 	char *inode_first_ext;
-	int inode_data_dirty;
+	int first_ext_status; /* 0 not in buf, 1 clean, 2 dirty*/
+
+	int inode_dirty;
 #if 0
 	/* cache write data */
 	struct extend_content *write_data_buf;
@@ -109,6 +111,7 @@ struct dentry_info {
 
 	__u32 next_extend;
 	__u32 dir_capacity;
+	__u32 bitmap_size; /* 512 bytes as a unit */
 
 	char *dentry_bitmap;
 };
