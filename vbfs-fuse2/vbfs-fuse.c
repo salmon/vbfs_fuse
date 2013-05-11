@@ -83,6 +83,9 @@ static int vbfs_fuse_getattr(const char *path, struct stat *stbuf)
 		return ret;
 	}
 
+	fill_stbuf_by_inode(stbuf, inode_v);
+
+#if 0
 	stbuf->st_ino = inode_v->i_ino;
 	if (inode_v->i_mode == VBFS_FT_DIR) {
 		stbuf->st_mode = S_IFDIR | 0777;
@@ -92,6 +95,7 @@ static int vbfs_fuse_getattr(const char *path, struct stat *stbuf)
 	stbuf->st_atime = inode_v->i_atime;
 	stbuf->st_mtime = inode_v->i_mtime;
 	stbuf->st_ctime = inode_v->i_ctime;
+#endif
 
 	vbfs_inode_close(inode_v);
 

@@ -107,6 +107,8 @@ __u32 bitops_next_pos(char *bitmap, __u32 bitmap_bits, __u32 start_ops)
 	int n = 0, i = 0, len = 0;
 	int ret = 0;
 
+	log_dbg("%u %u\n", bitmap_bits, start_ops);
+
 	assert(! (bitmap_bits % 32));
 
 	bitmap_size = bitmap_bits / 32;

@@ -197,8 +197,13 @@ void mempool_status(void)
 
 void *mp_valloc(unsigned int size)
 {
+#if 0
+	void *p = NULL;
+	p = Valloc(size);
+	return size;
+#else
 	int i;
-	char *p = NULL;
+	void *p = NULL;
 	int found = 0;
 
 	pthread_mutex_lock(&pool_global_lock);
@@ -220,12 +225,18 @@ void *mp_valloc(unsigned int size)
 	p = mempool_alloc(&mp[i]);
 
 	return p;
+#endif
 }
 
 void *mp_malloc(unsigned int size)
 {
+#if 0
+	void *p = NULL;
+	p = Malloc(size);
+	return size;
+#else
 	int i;
-	char *p = NULL;
+	void *p = NULL;
 	int found = 0;
 
 	pthread_mutex_lock(&pool_global_lock);
@@ -247,10 +258,14 @@ void *mp_malloc(unsigned int size)
 	p = mempool_alloc(&mp[i]);
 
 	return p;
+#endif
 }
 
 void mp_free(void *p, unsigned int size)
 {
+#if 0
+	free(p);
+#else
 	int i, m = -1, n = -1;
 
 	pthread_mutex_lock(&pool_global_lock);
@@ -274,4 +289,5 @@ void mp_free(void *p, unsigned int size)
 	if (n != -1) {
 		mempool_free(&mp[n], p);
 	}
+#endif
 }

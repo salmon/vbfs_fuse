@@ -25,4 +25,6 @@ int get_dentry(struct inode_vbfs *inode_v, struct list_head *dir_list);
 
 int put_dentry(struct list_head *dir_list);
 
+void fill_stbuf_by_inode(struct stat *stbuf, struct inode_vbfs *inode_v);
+
 #endif

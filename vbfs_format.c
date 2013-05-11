@@ -518,7 +518,9 @@ static void prepare_root_inode(char *inode_extend)
 	vbfs_root.i_atime = time(NULL);
 	vbfs_root.i_ctime = time(NULL);
 	vbfs_root.i_mtime = time(NULL);
-	vbfs_root.i_extend = 0;
+	vbfs_root.i_extend = vbfs_superblk.extend_bitmap_offset
+				+ vbfs_superblk.extend_bitmap_count
+				+ vbfs_params.inode_extend_cnt;
 
 	inode_to_disk(&vbfs_inode_dk.vbfs_inode, &vbfs_root);
 	memcpy(inode_extend, &vbfs_inode_dk, sizeof(vbfs_inode_dk_t));
@@ -665,6 +667,8 @@ static int write_root_dentry()
 	extend_no = vbfs_superblk.extend_bitmap_offset
 			+ vbfs_superblk.extend_bitmap_count
 			+ vbfs_params.inode_extend_cnt;
+
+	printf("root dirent extend %u\n", extend_no);
 
 	prepare_root_dentry(extend);
 

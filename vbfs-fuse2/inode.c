@@ -38,6 +38,8 @@ int vbfs_inode_update_times(struct inode_vbfs *v_inode, time_update_flags mask)
 	if (mask | UPDATE_MTIME)
 		v_inode->i_mtime = time(NULL);
 
+	vbfs_inode_mark_dirty(v_inode);
+
 	return 0;
 }
 
@@ -112,6 +114,7 @@ static int check_inode_valid_in_bitmap(__u32 ino)
 
 	ret = get_ino_bmc_info(ino_bmc, inode_bmc_no);
 	if (ret) {
+		log_err("get_ino_bmc_info error\n");
 		pthread_mutex_unlock(&ino_bmc->lock_ino_bm_cache);
 		return ret;
 	}
@@ -137,6 +140,7 @@ struct inode_cache_in_ext *get_inode_cache(__u32 ino, __u32 *ino_off_in_ext, int
 	__u32 inode_off_t = 0;
 	__u32 inodes_per_extend = 0;
 
+	log_dbg("get_inode_cache %u\n", ino);
 	extend_size = vbfs_ctx.super.s_extend_size;
 	inodes_per_extend = extend_size / INODE_SIZE;
 	inode_off_t = ino / inodes_per_extend;
@@ -160,7 +164,7 @@ struct inode_cache_in_ext *get_inode_cache(__u32 ino, __u32 *ino_off_in_ext, int
 		return NULL;
 	}
 
-	if ((extend_buf = mp_malloc(sizeof(extend_size))) == NULL) {
+	if ((extend_buf = mp_valloc(extend_size)) == NULL) {
 		mp_free(inode_cache, sizeof(struct inode_cache_in_ext));
 		*err_no = -ENOMEM;
 		return NULL;
@@ -176,6 +180,8 @@ struct inode_cache_in_ext *get_inode_cache(__u32 ino, __u32 *ino_off_in_ext, int
 	inode_cache->extend_no = extend_no;
 	inode_cache->inode_cache_dirty = 0;
 	inode_cache->content = extend_buf;
+
+	log_dbg("inode cache status: %u, %p\n", inode_cache->extend_no, inode_cache->content);
 
 	list_add_tail(&inode_cache->ino_cache_in_ext_list, &vbfs_ctx.inode_cache_list);
 	vbfs_ctx.inode_cache_extend_cnt ++;
@@ -221,6 +227,7 @@ static struct inode_vbfs *open_inode(__u32 ino, int *err_no)
 	char *pos = NULL;
 	struct inode_vbfs *inode_v = NULL;
 
+	log_dbg("open_inode %u, ENTER\n", ino);
 	*err_no = 0;
 	assert(vbfs_ctx.super.s_inode_count >= ino);
 
@@ -233,10 +240,13 @@ static struct inode_vbfs *open_inode(__u32 ino, int *err_no)
 
 	inode_cache = get_inode_cache(ino, &ino_off_in_ext, err_no);
 	if (*err_no) {
+		log_err("get_inode_cache error %d\n", *err_no);
 		mp_free(inode_v, sizeof(struct inode_vbfs));
 		pthread_mutex_unlock(&vbfs_ctx.lock_inode_cache);
 		return NULL;
 	}
+
+	log_dbg("cache extend_no is %u\n", inode_cache->extend_no);
 
 	pos = inode_cache->content + INODE_SIZE * ino_off_in_ext;
 	load_inode_info((vbfs_inode_dk_t *) pos, inode_v);
@@ -252,6 +262,8 @@ static struct inode_vbfs *open_inode(__u32 ino, int *err_no)
 	INIT_LIST_HEAD(&inode_v->inode_l);
 	pthread_mutex_init(&inode_v->lock_inode, NULL);
 
+	log_dbg("open_inode %u, EXIT\n", ino);
+
 	return inode_v;
 }
 
@@ -259,6 +271,8 @@ static struct inode_vbfs *get_vbfs_inode(__u32 ino, int *err_no)
 {
 	struct inode_vbfs *inode_v = NULL;
 	int ret = 0;
+
+	log_dbg("get_vbfs_inode %u, ENTER\n", ino);
 
 	ret = check_inode_valid_in_bitmap(ino);
 	if (ret) {
@@ -271,12 +285,16 @@ static struct inode_vbfs *get_vbfs_inode(__u32 ino, int *err_no)
 		return NULL;
 	}
 
+	log_dbg("get_vbfs_inode %u, EXIT\n", ino);
+
 	return inode_v;
 }
 
 static struct inode_vbfs *vbfs_inode_open_unlocked(__u32 ino, int *err_no)
 {
 	struct inode_vbfs *inode_v = NULL;
+
+	log_dbg("vbfs_inode_open_unlocked ENTER\n");
 
 	*err_no = 0;
 
@@ -292,6 +310,8 @@ static struct inode_vbfs *vbfs_inode_open_unlocked(__u32 ino, int *err_no)
 	}
 
 	add_to_active_inodelist(inode_v);
+
+	log_dbg("vbfs_inode_open_unlocked EXIT\n");
 
 	return inode_v;
 }
@@ -329,6 +349,7 @@ static int inode_writeback_to_cache(struct inode_vbfs *i_vbfs)
 	char *pos = NULL;
 	int ret = 0;
 
+	log_dbg("inode_writeback_to_cache ENTER\n");
 	/* inode metadata sync */
 	if (i_vbfs->inode_dirty) {
 		inode_cache = get_inode_cache(i_vbfs->i_ino, &ino_off_in_ext, &ret);
@@ -338,10 +359,15 @@ static int inode_writeback_to_cache(struct inode_vbfs *i_vbfs)
 		pos = inode_cache->content + INODE_SIZE * ino_off_in_ext;
 		save_inode_info(i_vbfs, (vbfs_inode_dk_t *) pos);
 		inode_cache->inode_cache_dirty = 1;
+
+		/* will low performance */
+		ret = inode_cache_wb_to_disk(inode_cache);
+		if (ret) {
+			return ret;
+		}
 	}
 
-	/* will low performance */
-	inode_cache_wb_to_disk(inode_cache);
+	log_dbg("inode_writeback_to_cache EXIT\n");
 
 	return 0;
 }
@@ -350,6 +376,8 @@ static int vbfs_inode_sync_unlocked(struct inode_vbfs *i_vbfs)
 {
 	struct extend_content *extend_data = NULL;
 	int ret = 0;
+
+	log_err("vbfs_inode_sync_unlocked ENTER\n");
 
 	pthread_mutex_lock(&vbfs_ctx.lock_inode_cache);
 	ret = inode_writeback_to_cache(i_vbfs);
@@ -375,6 +403,8 @@ static int vbfs_inode_sync_unlocked(struct inode_vbfs *i_vbfs)
 		}
 	}
 
+	log_err("vbfs_inode_sync_unlocked EXIT\n");
+
 	return ret;
 }
 
@@ -395,6 +425,7 @@ static int inode_free(struct inode_vbfs *i_vbfs)
 	struct extend_content *tmp = NULL;
 	__u32 extend_size = 0;
 
+	log_err("inode_free ENTER\n");
 	extend_size = vbfs_ctx.super.s_extend_size;
 
 	if (i_vbfs->inode_first_ext) {
@@ -419,6 +450,8 @@ static int inode_free(struct inode_vbfs *i_vbfs)
 
 	mp_free(i_vbfs, sizeof(struct inode_vbfs));
 
+	log_err("inode_free EXIT\n");
+
 	return 0;
 }
 
@@ -439,6 +472,8 @@ int vbfs_inode_close(struct inode_vbfs *i_vbfs)
 	struct inode_vbfs *inode_v = NULL;
 	struct inode_vbfs *tmp = NULL;
 
+	log_dbg("vbfs_inode_close %u ENTER\n", i_vbfs->i_ino);
+
 	pthread_mutex_lock(&vbfs_ctx.lock_active_inode);
 
 	list_for_each_entry_safe(inode_v, tmp, &vbfs_ctx.active_inode_list, inode_l) {
@@ -451,6 +486,8 @@ int vbfs_inode_close(struct inode_vbfs *i_vbfs)
 	}
 
 	pthread_mutex_unlock(&vbfs_ctx.lock_active_inode);
+
+	log_dbg("vbfs_inode_close EXIT\n");
 
 	return 0;
 }
@@ -480,6 +517,8 @@ int inode_get_first_extend_unlocked(struct inode_vbfs *inode_v)
 		mp_free(inode_v->inode_first_ext, extend_size);
 		return -EIO;
 	}
+
+	log_dbg("inode_get_first_extend_unlocked, get extend %u\n", inode_v->i_extend);
 
 	inode_v->first_ext_status = 1;
 
@@ -512,7 +551,7 @@ int vbfs_inode_lookup_by_name(struct inode_vbfs *v_inode_parent, const char *nam
 	if (found) {
 		return 0;
 	} else {
-		return -EEXIST;
+		return -ENOENT;
 	}
 }
 
@@ -524,7 +563,9 @@ struct inode_vbfs *vbfs_pathname_to_inode(const char *pathname, int *err_no)
 	char *pos = NULL;
 	char *subname = NULL;
 
-	name = strdup(name);
+	log_dbg("vbfs_pathname_to_inode %s, ENTER\n", pathname);
+
+	name = strdup(pathname);
 	if (name == NULL) {
 		*err_no = -ENOMEM;
 		return NULL;
@@ -553,6 +594,8 @@ struct inode_vbfs *vbfs_pathname_to_inode(const char *pathname, int *err_no)
 	}
 
 	free(name);
+
+	log_dbg("vbfs_pathname_to_inode EXIT\n", pathname);
 
 	return inode_v;
 }
