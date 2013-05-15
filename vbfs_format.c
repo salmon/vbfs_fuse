@@ -559,6 +559,7 @@ static void prepare_root_dentry(char *extend)
 	dir_meta.group_no = 0;
 	dir_meta.total_extends = 1;
 	dir_meta.dir_self_count = 2;
+	dir_meta.dir_total_count = 2;
 	dir_meta.next_extend = 0;
 	dir_count = (extend_size - VBFS_DIR_META_SIZE) / VBFS_DIR_SIZE;
 	dir_meta.bitmap_size = calc_div(dir_count, 512 * 8);

@@ -2,22 +2,144 @@
 #include "log.h"
 #include "mempool.h"
 #include "vbfs-fuse.h"
+#include "super.h"
 #include "dir.h"
 
 extern vbfs_fuse_context_t vbfs_ctx;
 
-static int alloc_extend_bitmap(__u32 *extend_no)
+int sync_ext_bmc_one(struct extend_bitmap_cache *ext_bmc)
 {
-	__u32 extend_off_t = 0;
-
-	extend_off_t = vbfs_ctx.super.extend_bitmap_current;
+	if (ext_bmc->cache_status == 2) {
+		write_extend(ext_bmc->extend_no, ext_bmc->content);
+		ext_bmc->cache_status = 1;
+	}
 
 	return 0;
 }
 
-static int alloc_inode_bitmap(__u32 *inode_no)
+static int get_ext_bmc_content(struct extend_bitmap_cache *ext_bmc)
 {
+	__u32 extend_size = 0;
+	__u32 extend_no = 0;
+	char *extend_buf = NULL;
+
+	if (ext_bmc->cache_status) {
+		return 0;
+	}
+
+	extend_size = vbfs_ctx.super.s_extend_size;
+
+	if ((extend_buf = mp_valloc(extend_size)) == NULL) {
+		return -ENOMEM;
+	}
+
+	extend_no = ext_bmc->extend_no;
+	log_err("extend_no %u", extend_no);
+	if (read_extend(extend_no, extend_buf)) {
+		mp_free(extend_buf, extend_size);
+		return -EIO;
+	}
+
+	ext_bmc->cache_status = 1;
+	ext_bmc->content = extend_buf;
+	ext_bmc->extend_bitmap_region = ext_bmc->content + EXTEND_BITMAP_META_SIZE;
+
+	/* if exceed threshold, swap out other cache */
+	/* Not Implement */
+
 	return 0;
+}
+
+static __u32 get_extend_bm_bits_num()
+{
+	__u32 bitmap_bits = 0, extend_size = 0;
+
+	extend_size = vbfs_ctx.super.s_extend_size;
+	bitmap_bits = (extend_size - INODE_BITMAP_META_SIZE) * 8;
+
+	return bitmap_bits;
+}
+
+static __u32 alloc_in_one_extend_bitmap(__u32 bm_current, int *err_no)
+{
+	char *bitmap = NULL;
+	__u32 bitmap_bits = 0;
+	__u32 offset = 0, start_pos = 0;
+	struct extend_bitmap_cache *ext_bmc = NULL;
+
+	bitmap_bits = get_extend_bm_bits_num();
+	ext_bmc = &vbfs_ctx.extend_bitmap_array[bm_current];
+
+	pthread_mutex_lock(&ext_bmc->lock_ext_bm_cache);
+
+	*err_no = get_ext_bmc_content(ext_bmc);
+	if (*err_no) {
+		pthread_mutex_unlock(&ext_bmc->lock_ext_bm_cache);
+		return 0;
+	}
+
+	bitmap = ext_bmc->extend_bitmap_region;
+	start_pos = ext_bmc->extend_bm_info.current_position;
+
+	offset = find_zerobit_and_set(bitmap, bitmap_bits, start_pos);
+	if (offset != 0) {
+		ext_bmc->cache_status = 2;
+		sync_ext_bmc_one(ext_bmc);
+	}
+
+	pthread_mutex_unlock(&ext_bmc->lock_ext_bm_cache);
+
+	return offset;
+}
+
+static int alloc_extend_bitmap(__u32 *extend_no)
+{
+	int ret = 0;
+	__u32 offset = 0, bm_current = 0, start_pos = 0;
+	__u32 bitmap_bits = 0;
+	int found = 0;
+
+	pthread_mutex_lock(&vbfs_ctx.lock_super);
+	bm_current = vbfs_ctx.super.extend_bitmap_current;
+	pthread_mutex_unlock(&vbfs_ctx.lock_super);
+
+	start_pos = bm_current;
+
+	while (0 == offset) {
+		offset = alloc_in_one_extend_bitmap(bm_current, &ret);
+		if (ret) {
+			return ret;
+		}
+		if (0 != offset) {
+			found = 1;
+			break;
+		}
+
+		pthread_mutex_lock(&vbfs_ctx.lock_super);
+
+		++ vbfs_ctx.super.extend_bitmap_current;
+		vbfs_ctx.super.extend_bitmap_current %= vbfs_ctx.super.extend_bitmap_count;
+		bm_current = vbfs_ctx.super.extend_bitmap_current;
+
+		vbfs_ctx.super.super_vbfs_dirty = 1;
+
+		pthread_mutex_unlock(&vbfs_ctx.lock_super);
+
+		sync_super();
+
+		if (start_pos == bm_current) {
+			break;
+		}
+	}
+
+	bitmap_bits = get_extend_bm_bits_num();
+	if (found) {
+		*extend_no = vbfs_ctx.super.inode_offset
+				+ vbfs_ctx.super.inode_extends
+				+ offset - 1 + bm_current * bitmap_bits;
+		return 0;
+	} else
+		return -ENOSPC;
 }
 
 static int free_extend_bitmap()
@@ -27,6 +149,13 @@ static int free_extend_bitmap()
 
 static int free_inode_bitmap()
 {
+	return 0;
+}
+
+int vbfs_inode_mark_dirty(struct inode_vbfs *i_vbfs)
+{
+	i_vbfs->inode_dirty = 1;
+
 	return 0;
 }
 
@@ -60,7 +189,7 @@ static void add_to_active_inodelist(struct inode_vbfs *inode_v)
 	list_add_tail(&inode_v->inode_l, &vbfs_ctx.active_inode_list);
 }
 
-static int get_ino_bmc_info(struct inode_bitmap_cache *ino_bmc, __u32 group_no)
+static int get_ino_bmc_content(struct inode_bitmap_cache *ino_bmc)
 {
 	__u32 extend_size = 0;
 	__u32 extend_no = 0;
@@ -76,7 +205,8 @@ static int get_ino_bmc_info(struct inode_bitmap_cache *ino_bmc, __u32 group_no)
 		return -ENOMEM;
 	}
 
-	extend_no = vbfs_ctx.super.inode_bitmap_offset + group_no;
+	extend_no = ino_bmc->extend_no;
+	log_err("extend_no %u", extend_no);
 	if (read_extend(extend_no, extend_buf)) {
 		mp_free(extend_buf, extend_size);
 		return -EIO;
@@ -90,6 +220,97 @@ static int get_ino_bmc_info(struct inode_bitmap_cache *ino_bmc, __u32 group_no)
 	/* Not Implement */
 
 	return 0;
+}
+
+static __u32 get_inode_bm_bits_num()
+{
+	__u32 bitmap_bits = 0, extend_size = 0;
+
+	extend_size = vbfs_ctx.super.s_extend_size;
+	bitmap_bits = (extend_size - INODE_BITMAP_META_SIZE) * 8;
+
+	return bitmap_bits;
+}
+
+static __u32 alloc_in_one_inode_bitmap(__u32 bm_current, int *err_no)
+{
+	char *bitmap = NULL;
+	__u32 bitmap_bits = 0;
+	__u32 offset = 0, start_pos = 0;
+	struct inode_bitmap_cache *ino_bmc = NULL;
+
+	bitmap_bits = get_inode_bm_bits_num();
+	ino_bmc = &vbfs_ctx.inode_bitmap_array[bm_current];
+
+	pthread_mutex_lock(&ino_bmc->lock_ino_bm_cache);
+
+	*err_no = get_ino_bmc_content(ino_bmc);
+	if (*err_no) {
+		pthread_mutex_unlock(&ino_bmc->lock_ino_bm_cache);
+		return 0;
+	}
+
+	bitmap = ino_bmc->inode_bitmap_region;
+	start_pos = ino_bmc->inode_bm_info.current_position;
+
+	offset = find_zerobit_and_set(bitmap, bitmap_bits, start_pos);
+	if (offset != 0)
+		ino_bmc->cache_status = 2;
+
+	write_back_ino_bm(ino_bmc);
+
+	pthread_mutex_unlock(&ino_bmc->lock_ino_bm_cache);
+
+	return offset;
+}
+
+static int alloc_inode_bitmap(__u32 *inode_no)
+{
+	int ret = 0;
+	__u32 offset = 0, bm_current = 0, start_pos = 0;
+	__u32 bitmap_bits = 0;
+	int found = 0;
+
+	pthread_mutex_lock(&vbfs_ctx.lock_super);
+	bm_current = vbfs_ctx.super.inode_bitmap_current;
+	pthread_mutex_unlock(&vbfs_ctx.lock_super);
+
+	start_pos = bm_current;
+
+	while (0 == offset) {
+		offset = alloc_in_one_inode_bitmap(bm_current, &ret);
+		if (ret) {
+			return ret;
+		}
+		if (0 != offset) {
+			found = 1;
+			break;
+		}
+
+		pthread_mutex_lock(&vbfs_ctx.lock_super);
+
+		++ vbfs_ctx.super.inode_bitmap_current;
+		vbfs_ctx.super.inode_bitmap_current %= vbfs_ctx.super.inode_bitmap_count;
+		bm_current = vbfs_ctx.super.inode_bitmap_current;
+
+		vbfs_ctx.super.super_vbfs_dirty = 1;
+
+		pthread_mutex_unlock(&vbfs_ctx.lock_super);
+
+		sync_super();
+
+		if (start_pos == bm_current) {
+			break;
+		}
+	}
+
+
+	bitmap_bits = get_inode_bm_bits_num();
+	if (found) {
+		*inode_no = offset - 1 + bm_current * bitmap_bits;
+		return 0;
+	} else
+		return -ENOSPC;
 }
 
 static int check_inode_valid_in_bitmap(__u32 ino)
@@ -112,9 +333,9 @@ static int check_inode_valid_in_bitmap(__u32 ino)
 
 	pthread_mutex_lock(&ino_bmc->lock_ino_bm_cache);
 
-	ret = get_ino_bmc_info(ino_bmc, inode_bmc_no);
+	ret = get_ino_bmc_content(ino_bmc);
 	if (ret) {
-		log_err("get_ino_bmc_info error\n");
+		log_err("get_ino_bmc_content error\n");
 		pthread_mutex_unlock(&ino_bmc->lock_ino_bm_cache);
 		return ret;
 	}
@@ -140,7 +361,6 @@ struct inode_cache_in_ext *get_inode_cache(__u32 ino, __u32 *ino_off_in_ext, int
 	__u32 inode_off_t = 0;
 	__u32 inodes_per_extend = 0;
 
-	log_dbg("get_inode_cache %u\n", ino);
 	extend_size = vbfs_ctx.super.s_extend_size;
 	inodes_per_extend = extend_size / INODE_SIZE;
 	inode_off_t = ino / inodes_per_extend;
@@ -227,7 +447,6 @@ static struct inode_vbfs *open_inode(__u32 ino, int *err_no)
 	char *pos = NULL;
 	struct inode_vbfs *inode_v = NULL;
 
-	log_dbg("open_inode %u, ENTER\n", ino);
 	*err_no = 0;
 	assert(vbfs_ctx.super.s_inode_count >= ino);
 
@@ -246,8 +465,6 @@ static struct inode_vbfs *open_inode(__u32 ino, int *err_no)
 		return NULL;
 	}
 
-	log_dbg("cache extend_no is %u\n", inode_cache->extend_no);
-
 	pos = inode_cache->content + INODE_SIZE * ino_off_in_ext;
 	load_inode_info((vbfs_inode_dk_t *) pos, inode_v);
 
@@ -262,8 +479,6 @@ static struct inode_vbfs *open_inode(__u32 ino, int *err_no)
 	INIT_LIST_HEAD(&inode_v->inode_l);
 	pthread_mutex_init(&inode_v->lock_inode, NULL);
 
-	log_dbg("open_inode %u, EXIT\n", ino);
-
 	return inode_v;
 }
 
@@ -271,8 +486,6 @@ static struct inode_vbfs *get_vbfs_inode(__u32 ino, int *err_no)
 {
 	struct inode_vbfs *inode_v = NULL;
 	int ret = 0;
-
-	log_dbg("get_vbfs_inode %u, ENTER\n", ino);
 
 	ret = check_inode_valid_in_bitmap(ino);
 	if (ret) {
@@ -285,16 +498,12 @@ static struct inode_vbfs *get_vbfs_inode(__u32 ino, int *err_no)
 		return NULL;
 	}
 
-	log_dbg("get_vbfs_inode %u, EXIT\n", ino);
-
 	return inode_v;
 }
 
 static struct inode_vbfs *vbfs_inode_open_unlocked(__u32 ino, int *err_no)
 {
 	struct inode_vbfs *inode_v = NULL;
-
-	log_dbg("vbfs_inode_open_unlocked ENTER\n");
 
 	*err_no = 0;
 
@@ -311,8 +520,6 @@ static struct inode_vbfs *vbfs_inode_open_unlocked(__u32 ino, int *err_no)
 
 	add_to_active_inodelist(inode_v);
 
-	log_dbg("vbfs_inode_open_unlocked EXIT\n");
-
 	return inode_v;
 }
 
@@ -325,11 +532,6 @@ struct inode_vbfs *vbfs_inode_open(__u32 ino, int *err_no)
 	pthread_mutex_unlock(&vbfs_ctx.lock_active_inode);
 
 	return inode_v;
-}
-
-struct inode_vbfs *vbfs_inode_create(__u32 ino, __u32 mode_t, int *err_no)
-{
-	return NULL;
 }
 
 static int inode_cache_wb_to_disk(struct inode_cache_in_ext *inode_cache)
@@ -349,7 +551,6 @@ static int inode_writeback_to_cache(struct inode_vbfs *i_vbfs)
 	char *pos = NULL;
 	int ret = 0;
 
-	log_dbg("inode_writeback_to_cache ENTER\n");
 	/* inode metadata sync */
 	if (i_vbfs->inode_dirty) {
 		inode_cache = get_inode_cache(i_vbfs->i_ino, &ino_off_in_ext, &ret);
@@ -360,16 +561,111 @@ static int inode_writeback_to_cache(struct inode_vbfs *i_vbfs)
 		save_inode_info(i_vbfs, (vbfs_inode_dk_t *) pos);
 		inode_cache->inode_cache_dirty = 1;
 
-		/* will low performance */
+		/* low performance */
 		ret = inode_cache_wb_to_disk(inode_cache);
 		if (ret) {
 			return ret;
 		}
 	}
 
-	log_dbg("inode_writeback_to_cache EXIT\n");
-
 	return 0;
+}
+
+struct inode_vbfs *inode_create(__u32 ino, __u32 p_ino, __u32 mode_t, int *err_no)
+{
+	struct inode_vbfs *inode_v = NULL;
+	char *extend_buf = NULL;
+	__u32 extend_size = 0;
+	int ret = 0;
+
+	if ((inode_v = mp_malloc(sizeof(struct inode_vbfs))) == NULL) {
+		*err_no = -ENOMEM;
+		return NULL;
+	}
+
+	extend_size = vbfs_ctx.super.s_extend_size;
+
+	inode_v->i_ino = ino;
+	inode_v->i_pino = p_ino;
+	inode_v->i_mode = mode_t;
+	if (inode_v->i_mode == VBFS_FT_DIR) {
+		inode_v->i_size = vbfs_ctx.super.s_extend_size;
+	} else {
+		inode_v->i_size = 0;
+	}
+
+	inode_v->i_ctime = time(NULL);
+	inode_v->i_atime = time(NULL);
+	inode_v->i_mtime = time(NULL);
+
+	ret = alloc_extend_bitmap(&inode_v->i_extend);
+	log_dbg("use extend %u", inode_v->i_extend);
+	if (ret) {
+		*err_no = ret;
+		mp_free(inode_v, sizeof(struct inode_vbfs));
+		return NULL;
+	}
+
+	pthread_mutex_lock(&vbfs_ctx.lock_inode_cache);
+
+	inode_v->inode_first_ext = NULL;
+	inode_v->inode_dirty = 1;
+	inode_v->first_ext_status = 0;
+	inode_v->nref = 1;
+
+	INIT_LIST_HEAD(&inode_v->data_buf_list);
+	INIT_LIST_HEAD(&inode_v->inode_l);
+	pthread_mutex_init(&inode_v->lock_inode, NULL);
+
+	if (inode_v->i_mode == VBFS_FT_DIR) {
+		extend_buf = mp_valloc(extend_size);
+		if (extend_buf == NULL) {
+			*err_no = -ENOMEM;
+			return NULL;
+		}
+
+		memset(extend_buf, 0, extend_size);
+		inode_v->inode_first_ext = extend_buf;
+		init_default_dir(inode_v, p_ino);
+
+		inode_v->first_ext_status = 2;
+	} else {
+		log_err("Not Implement");
+	}
+
+	inode_writeback_to_cache(inode_v);
+
+	pthread_mutex_unlock(&vbfs_ctx.lock_inode_cache);
+
+	return inode_v;
+}
+
+struct inode_vbfs *vbfs_inode_create(__u32 p_ino, __u32 mode_t, int *err_no)
+{
+	struct inode_vbfs *inode_v = NULL;
+	int ret = 0;
+	__u32 ino = 0;
+
+	ret = alloc_inode_bitmap(&ino);
+	log_dbg("alloc ino %u", ino);
+	if (ret) {
+		*err_no = ret;
+		return NULL;
+	}
+
+	pthread_mutex_lock(&vbfs_ctx.lock_active_inode);
+
+	inode_v = inode_create(ino, p_ino, mode_t, err_no);
+	if (*err_no) {
+		pthread_mutex_unlock(&vbfs_ctx.lock_active_inode);
+		return NULL;
+	}
+
+	add_to_active_inodelist(inode_v);
+
+	pthread_mutex_unlock(&vbfs_ctx.lock_active_inode);
+
+	return inode_v;
 }
 
 static int vbfs_inode_sync_unlocked(struct inode_vbfs *i_vbfs)
@@ -377,7 +673,7 @@ static int vbfs_inode_sync_unlocked(struct inode_vbfs *i_vbfs)
 	struct extend_content *extend_data = NULL;
 	int ret = 0;
 
-	log_err("vbfs_inode_sync_unlocked ENTER\n");
+	log_dbg("vbfs_inode_sync_unlocked ENTER\n");
 
 	pthread_mutex_lock(&vbfs_ctx.lock_inode_cache);
 	ret = inode_writeback_to_cache(i_vbfs);
@@ -472,8 +768,6 @@ int vbfs_inode_close(struct inode_vbfs *i_vbfs)
 	struct inode_vbfs *inode_v = NULL;
 	struct inode_vbfs *tmp = NULL;
 
-	log_dbg("vbfs_inode_close %u ENTER\n", i_vbfs->i_ino);
-
 	pthread_mutex_lock(&vbfs_ctx.lock_active_inode);
 
 	list_for_each_entry_safe(inode_v, tmp, &vbfs_ctx.active_inode_list, inode_l) {
@@ -486,15 +780,6 @@ int vbfs_inode_close(struct inode_vbfs *i_vbfs)
 	}
 
 	pthread_mutex_unlock(&vbfs_ctx.lock_active_inode);
-
-	log_dbg("vbfs_inode_close EXIT\n");
-
-	return 0;
-}
-
-int vbfs_inode_mark_dirty(struct inode_vbfs *i_vbfs)
-{
-	i_vbfs->inode_dirty = 1;
 
 	return 0;
 }
@@ -542,6 +827,7 @@ int vbfs_inode_lookup_by_name(struct inode_vbfs *v_inode_parent, const char *nam
 	list_for_each_entry(dentry, &dir_list, dentry_list) {
 		if (0 == strncmp(dentry->name, name, NAME_LEN - 1)) {
 			found = 1;
+			*ino = dentry->inode;
 			break;
 		}
 	}
@@ -562,8 +848,6 @@ struct inode_vbfs *vbfs_pathname_to_inode(const char *pathname, int *err_no)
 	char *name = NULL;
 	char *pos = NULL;
 	char *subname = NULL;
-
-	log_dbg("vbfs_pathname_to_inode %s, ENTER\n", pathname);
 
 	name = strdup(pathname);
 	if (name == NULL) {
@@ -594,8 +878,6 @@ struct inode_vbfs *vbfs_pathname_to_inode(const char *pathname, int *err_no)
 	}
 
 	free(name);
-
-	log_dbg("vbfs_pathname_to_inode EXIT\n", pathname);
 
 	return inode_v;
 }

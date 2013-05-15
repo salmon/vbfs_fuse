@@ -137,9 +137,7 @@ struct extend_bitmap_cache {
 	struct extend_bitmap_info extend_bm_info;
 	char *extend_bitmap_region;
 
-	int cache_status; /* 0->(not ready) 1->(ready) */
-
-	int extend_bitmap_dirty;
+	int cache_status; /* 0->(not ready) 1->(clean) 2->(dirty) */
 
 	pthread_mutex_t lock_ext_bm_cache;
 };
@@ -151,9 +149,7 @@ struct inode_bitmap_cache {
 	struct inode_bitmap_info inode_bm_info;
 	char *inode_bitmap_region;
 
-	int cache_status; /* 0->(not ready) 1->(ready) */
-
-	int inode_bitmap_dirty;
+	int cache_status; /* 0->(not ready) 1->(clean) 2->(dirty) */
 
 	pthread_mutex_t lock_ino_bm_cache;
 };

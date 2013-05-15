@@ -35,4 +35,6 @@ struct inode_vbfs *vbfs_pathname_to_inode(const char *pathname, int *err_no);
 
 int inode_get_first_extend_unlocked(struct inode_vbfs *inode_v);
 
+struct inode_vbfs *vbfs_inode_create(__u32 p_ino, __u32 mode_t, int *err_no);
+
 #endif

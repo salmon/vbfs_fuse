@@ -116,7 +116,7 @@ static int init_inode_bitmap(void)
 
 	tmp = vbfs_ctx.inode_bitmap_array;
 	for (i = 0; i < count; i ++) {
-		tmp->extend_no = 0;
+		tmp->extend_no = vbfs_ctx.super.inode_bitmap_offset + i;
 		tmp->content = NULL;
 		memset(&tmp->inode_bm_info, 0, sizeof(struct inode_bitmap_info));
 		if (init_inode_bm_info(i, &tmp->inode_bm_info)) {
@@ -124,7 +124,6 @@ static int init_inode_bitmap(void)
 		}
 		tmp->inode_bitmap_region = NULL;
 		tmp->cache_status = 0;
-		tmp->inode_bitmap_dirty = 0;
 		pthread_mutex_init(&tmp->lock_ino_bm_cache, NULL);
 
 		++ tmp;
@@ -185,7 +184,7 @@ static int init_extend_bitmap(void)
 
 	tmp = vbfs_ctx.extend_bitmap_array;
 	for (i = 0; i < count; i ++) {
-		tmp->extend_no = 0;
+		tmp->extend_no = vbfs_ctx.super.extend_bitmap_offset + i;
 		tmp->content = NULL;
 		memset(&tmp->extend_bm_info, 0, sizeof(struct extend_bitmap_info));
 		if (init_extend_bm_info(i, &tmp->extend_bm_info)) {
@@ -193,7 +192,6 @@ static int init_extend_bitmap(void)
 		}
 		tmp->extend_bitmap_region = NULL;
 		tmp->cache_status = 0;
-		tmp->extend_bitmap_dirty = 0;
 		pthread_mutex_init(&tmp->lock_ext_bm_cache, NULL);
 
 		++ tmp;
@@ -251,7 +249,7 @@ err:
 	return -1;
 }
 
-static int sync_super_locked(void)
+static int sync_super_unlocked(void)
 {
 	int fd;
 
@@ -281,25 +279,21 @@ int sync_super(void)
 	int ret;
 
 	pthread_mutex_lock(&vbfs_ctx.lock_super);
-	ret = sync_super_locked();
+	ret = sync_super_unlocked();
 	pthread_mutex_unlock(&vbfs_ctx.lock_super);
 
 	return ret;
 }
 
-static int write_back_ext_bm(struct extend_bitmap_cache *ext_bmc)
+int write_back_ext_bm(struct extend_bitmap_cache *ext_bmc)
 {
-	if (ext_bmc->cache_status == 0) {
-		log_err("BUG !!\n");
-		ext_bmc->extend_bitmap_dirty = 0;
-		return -1;
-	}
+	if (ext_bmc->cache_status == 2) {
+		if (write_extend(ext_bmc->extend_no, ext_bmc->content)) {
+			return -EIO;
+		}
 
-	if (write_extend(ext_bmc->extend_no, ext_bmc->content)) {
-		return -1;
+		ext_bmc->cache_status = 1;
 	}
-
-	ext_bmc->extend_bitmap_dirty = 0;
 
 	return 0;
 }
@@ -314,7 +308,7 @@ int sync_extend_bitmap(void)
 
 	for (i = 0; i < count; i ++) {
 		pthread_mutex_lock(&tmp->lock_ext_bm_cache);
-		if (tmp->extend_bitmap_dirty) {
+		if (tmp->cache_status == 2) {
 			write_back_ext_bm(tmp);
 		}
 		pthread_mutex_unlock(&tmp->lock_ext_bm_cache);
@@ -325,19 +319,15 @@ int sync_extend_bitmap(void)
 	return 0;
 }
 
-static int write_back_ino_bm(struct inode_bitmap_cache *ino_bmc)
+int write_back_ino_bm(struct inode_bitmap_cache *ino_bmc)
 {
-	if (ino_bmc->cache_status == 0) {
-		log_err("BUG !!\n");
-		ino_bmc->inode_bitmap_dirty = 0;
-		return -1;
-	}
+	if (ino_bmc->cache_status == 2) {
+		if (write_extend(ino_bmc->extend_no, ino_bmc->content)) {
+			return -EIO;
+		}
 
-	if (write_extend(ino_bmc->extend_no, ino_bmc->content)) {
-		return -1;
+		ino_bmc->cache_status = 1;
 	}
-
-	ino_bmc->inode_bitmap_dirty = 0;
 
 	return 0;
 }
@@ -352,7 +342,7 @@ int sync_inode_bitmap(void)
 
 	for (i = 0; i < count; i ++) {
 		pthread_mutex_lock(&tmp->lock_ino_bm_cache);
-		if (tmp->inode_bitmap_dirty) {
+		if (tmp->cache_status == 2) {
 			write_back_ino_bm(tmp);
 		}
 		pthread_mutex_unlock(&tmp->lock_ino_bm_cache);

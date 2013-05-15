@@ -85,18 +85,6 @@ static int vbfs_fuse_getattr(const char *path, struct stat *stbuf)
 
 	fill_stbuf_by_inode(stbuf, inode_v);
 
-#if 0
-	stbuf->st_ino = inode_v->i_ino;
-	if (inode_v->i_mode == VBFS_FT_DIR) {
-		stbuf->st_mode = S_IFDIR | 0777;
-	} else if (inode_v->i_mode == VBFS_FT_REG_FILE) {
-		stbuf->st_mode = S_IFREG | 0777;
-	}
-	stbuf->st_atime = inode_v->i_atime;
-	stbuf->st_mtime = inode_v->i_mtime;
-	stbuf->st_ctime = inode_v->i_ctime;
-#endif
-
 	vbfs_inode_close(inode_v);
 
 	return 0;
@@ -161,8 +149,52 @@ static int vbfs_fuse_releasedir(const char *path, struct fuse_file_info *fi)
 
 static int vbfs_fuse_mkdir(const char *path, mode_t mode)
 {
+	int ret = 0;
+	struct inode_vbfs *inode_v = NULL;
+	char last_name[NAME_LEN];
+	char *name = NULL;
+	char *pos = NULL;
+
 	log_dbg("vbfs_fuse_mkdir\n");
 
+	memset(last_name, 0, sizeof(last_name));
+	name = strdup(path);
+	if (NULL == name) {
+		return -ENOMEM;
+	}
+	pos = name;
+
+	ret = get_lastname(pos, last_name, PATH_SEP);
+	if (ret) {
+		free(name);
+		return -EINVAL;
+	}
+	if (strlen(last_name) == 0) {
+		free(name);
+		return -EEXIST;
+	}
+
+	inode_v = vbfs_pathname_to_inode(pos, &ret);
+	if (ret) {
+		free(name);
+		return ret;
+	}
+
+	ret = vbfs_mkdir(inode_v, last_name);
+	if (ret) {
+		free(name);
+		return ret;
+	}
+
+	vbfs_inode_update_times(inode_v, UPDATE_ATIME | UPDATE_MTIME);
+
+	ret = vbfs_inode_close(inode_v);
+	if (ret) {
+		free(name);
+		return ret;
+	}
+
+	free(name);
 	return 0;
 }
 

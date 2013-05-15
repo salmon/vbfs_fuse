@@ -83,6 +83,12 @@ int check_ffs(char *bitmap, __u32 bitmap_bits, __u32 bit);
 
 char *pathname_str_sep(char **pathname, const char delim);
 
-__u32 bitops_next_pos(char *bitmap, __u32 bitmap_bits, __u32 start_ops);
+__u32 bitops_next_pos_set(char *bitmap, __u32 bitmap_bits, __u32 start_ops);
+
+__u32 bitops_next_pos_zero(char *bitmap, __u32 bitmap_bits, __u32 start_ops);
+
+__u32 find_zerobit_and_set(char *bitmap, __u32 bitmap_bits, __u32 start_ops);
+
+int get_lastname(char *pathname, char *last_name, const char delim);
 
 #endif

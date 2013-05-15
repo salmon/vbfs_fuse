@@ -4,6 +4,8 @@
 #include "vbfs-fuse.h"
 #include "inode.h"
 
+extern vbfs_fuse_context_t vbfs_ctx;
+
 static void load_dentry_info(vbfs_dir_meta_dk_t *dir_meta_disk,
 				struct dentry_info *dir_info)
 {
@@ -16,14 +18,6 @@ static void load_dentry_info(vbfs_dir_meta_dk_t *dir_meta_disk,
 	dir_info->next_extend = le32_to_cpu(dir_meta_disk->vbfs_dir_meta.next_extend);
 	dir_info->dir_capacity = le32_to_cpu(dir_meta_disk->vbfs_dir_meta.dir_capacity);
 	dir_info->bitmap_size = le32_to_cpu(dir_meta_disk->vbfs_dir_meta.bitmap_size);
-
-	log_dbg("\n");
-	log_dbg("group_no %u\n", dir_info->group_no);
-	log_dbg("total_extends %u\n", dir_info->total_extends);
-	log_dbg("bitmap_size %u\n", dir_info->bitmap_size);
-	log_dbg("dir_self_count %u\n", dir_info->dir_self_count);
-	log_dbg("dir_total_count %u\n", dir_info->dir_total_count);
-	log_dbg("\n");
 }
 
 static void save_dentry_info(vbfs_dir_meta_dk_t *dir_meta_disk,
@@ -48,10 +42,6 @@ static void load_dirent(struct vbfs_dirent_disk * dir_dk, struct dentry_vbfs *di
 	dir->file_type = cpu_to_le32(dir_dk->file_type);
 
 	memcpy(dir->name, dir_dk->name, NAME_LEN);
-
-	log_dbg("ino %u\n", dir->inode);
-	log_dbg("file type %u\n", dir->file_type);
-	log_dbg("name %s\n", dir->name);
 }
 
 static void save_dirent(struct vbfs_dirent_disk * dir_dk, struct dentry_vbfs *dir)
@@ -59,7 +49,7 @@ static void save_dirent(struct vbfs_dirent_disk * dir_dk, struct dentry_vbfs *di
 	dir_dk->inode = le32_to_cpu(dir->inode);
 	dir_dk->file_type = le32_to_cpu(dir->file_type);
 
-	memcpy(dir_dk->name, dir->name, NAME_LEN);
+	strncpy(dir_dk->name, dir->name, NAME_LEN);
 }
 
 static int get_dentry_in_extend(struct dentry_info *dir_info,
@@ -71,27 +61,43 @@ static int get_dentry_in_extend(struct dentry_info *dir_info,
 	__u32 bitmap_bits = 0;
 	struct dentry_vbfs *dir = NULL;
 	char *pos = NULL;
+	char *dir_data = 0;
 
+	bitmap = dir_info->dentry_bitmap;
 	bitmap_bits = dir_info->bitmap_size * 4096;
+	dir_data = extend + VBFS_DIR_META_SIZE + dir_info->bitmap_size * VBFS_DIR_SIZE;
 
 	log_dbg("##### dir extend info %u #####\n", dir_info->dir_self_count);
 
 	for (i = 0; i < dir_info->dir_self_count; i ++) {
-		offset = bitops_next_pos(bitmap, bitmap_bits, offset);
+		offset = bitops_next_pos_set(bitmap, bitmap_bits, offset);
 		if (offset == 0) {
 			break;
 		}
 		dir = mp_malloc(sizeof(struct dentry_vbfs));
 
-		pos = extend + (offset - 1) * VBFS_DIR_SIZE;
+		pos = dir_data + (offset - 1) * VBFS_DIR_SIZE;
 		load_dirent((struct vbfs_dirent_disk *) pos, dir);
 
 		list_add(&dir->dentry_list, dir_list);
 	}
 
-	log_dbg("get_dentry_in_extend EXIT\n");
-
 	return ret;
+}
+
+static int get_fst_dirent_info(struct inode_vbfs *inode_v, struct dentry_info *fst_dir_info)
+{
+	int ret = 0;
+
+	ret = inode_get_first_extend_unlocked(inode_v);
+	if (ret) {
+		return ret;
+	}
+
+	load_dentry_info((vbfs_dir_meta_dk_t *) inode_v->inode_first_ext, fst_dir_info);
+	fst_dir_info->dentry_bitmap = inode_v->inode_first_ext + VBFS_DIR_META_SIZE;
+
+	return 0;
 }
 
 int get_dentry(struct inode_vbfs *inode_v, struct list_head *dir_list)
@@ -106,13 +112,11 @@ int get_dentry(struct inode_vbfs *inode_v, struct list_head *dir_list)
 		return -ENOTDIR;
 	}
 
-	ret = inode_get_first_extend_unlocked(inode_v);
+	ret = get_fst_dirent_info(inode_v, &fst_dir_info);
 	if (ret) {
 		pthread_mutex_unlock(&inode_v->lock_inode);
 		return ret;
 	}
-
-	load_dentry_info((vbfs_dir_meta_dk_t *) inode_v->inode_first_ext, &fst_dir_info);
 
 	ret = get_dentry_in_extend(&fst_dir_info, inode_v->inode_first_ext, dir_list);
 	if (ret) {
@@ -145,9 +149,93 @@ int put_dentry(struct list_head *dir_list)
 	return 0;
 }
 
-int add_dentry()
+static __u32 get_dir_bitmap_size()
 {
-	return 0;
+	__u32 extend_size = 0;
+	__u32 dir_count = 0;
+	__u32 bitmap_size = 0;
+
+	extend_size = vbfs_ctx.super.s_extend_size;
+	dir_count = (extend_size - VBFS_DIR_META_SIZE) / VBFS_DIR_SIZE;
+
+	if (dir_count % 4096) {
+		bitmap_size = dir_count / 4096 + 1;
+	} else {
+		bitmap_size = dir_count / 4096;
+	}
+
+	return bitmap_size;
+}
+
+static __u32 get_dir_bitmap_capacity()
+{
+	__u32 extend_size = 0;
+	__u32 dir_count = 0;
+	__u32 bitmap_size = 0;
+	__u32 dir_capacity = 0;
+
+	extend_size = vbfs_ctx.super.s_extend_size;
+	dir_count = (extend_size - VBFS_DIR_META_SIZE) / VBFS_DIR_SIZE;
+
+	if (dir_count % 4096)
+		bitmap_size = dir_count / 4096 + 1;
+	else
+		bitmap_size = dir_count / 4096;
+
+	dir_capacity = dir_count - bitmap_size;
+
+	return dir_capacity;
+}
+
+void init_default_dir(struct inode_vbfs *inode_v, __u32 p_ino)
+{
+	__u32 bitmap_bits = 0;
+	char *pos = NULL;
+	struct dentry_info dir_info;
+	char *bitmap = NULL;
+	__u32 offset = 0;
+	int i = 0;
+	struct dentry_vbfs dir;
+
+	dir_info.group_no = 0;
+	dir_info.total_extends = 1;
+
+	dir_info.dir_self_count = 2;
+	dir_info.dir_total_count = 2;
+
+	dir_info.next_extend = 0;
+	dir_info.bitmap_size = get_dir_bitmap_size();
+	dir_info.dir_capacity = get_dir_bitmap_capacity();
+
+	pos = inode_v->inode_first_ext;
+	save_dentry_info((vbfs_dir_meta_dk_t *) pos, &dir_info);
+
+	/* init bitmap */
+	bitmap = inode_v->inode_first_ext + VBFS_DIR_META_SIZE;
+	bitmap_bits = dir_info.bitmap_size * 4096;
+
+	for (i = 0; i < dir_info.dir_self_count; i ++) {
+		offset = find_zerobit_and_set(bitmap, bitmap_bits, 0);
+		if (offset != (i + 1))
+			log_err("BUG\n");
+	}
+
+	/* init default dirent(.)(..) */
+	pos = inode_v->inode_first_ext + VBFS_DIR_META_SIZE + dir_info.bitmap_size * VBFS_DIR_SIZE;
+	log_dbg("offset %u, bitmap_size %u", pos - inode_v->inode_first_ext, dir_info.bitmap_size);
+	memset(&dir, 0, sizeof(dir));
+	dir.inode = inode_v->i_ino;
+	dir.file_type = VBFS_FT_DIR;
+	strcpy(dir.name, ".");
+	save_dirent((struct vbfs_dirent_disk *) pos, &dir);
+
+	pos += VBFS_DIR_SIZE;
+	log_dbg("offset %u", pos - inode_v->inode_first_ext);
+	memset(&dir, 0, sizeof(dir));
+	dir.inode = p_ino;
+	dir.file_type = VBFS_FT_DIR;
+	strcpy(dir.name, "..");
+	save_dirent((struct vbfs_dirent_disk *) pos, &dir);
 }
 
 void fill_stbuf_by_inode(struct stat *stbuf, struct inode_vbfs *inode_v)
@@ -159,6 +247,8 @@ void fill_stbuf_by_inode(struct stat *stbuf, struct inode_vbfs *inode_v)
 	} else if (inode_v->i_mode == VBFS_FT_REG_FILE) {
 		stbuf->st_mode = S_IFREG | 0777;
 	}
+
+	stbuf->st_size = inode_v->i_size;
 
 	stbuf->st_atime = inode_v->i_atime;
 	stbuf->st_mtime = inode_v->i_mtime;
@@ -191,6 +281,84 @@ int vbfs_readdir(struct inode_vbfs *inode_v, off_t *filler_pos, fuse_fill_dir_t 
 	}
 
 	put_dentry(&dir_list);
+
+	return 0;
+}
+
+int add_dirent(struct inode_vbfs *inode_v, const char *name, __u32 ino)
+{
+	struct dentry_info fst_dir_info;
+	struct dentry_vbfs dir;
+	int ret = 0;
+	__u32 bitmap_bits = 0;
+	__u32 offset = 0;
+	char *bitmap = NULL, *pos = NULL;
+
+	memset(&dir, 0, sizeof(dir));
+
+	pthread_mutex_lock(&inode_v->lock_inode);
+
+	if (inode_v->i_mode != VBFS_FT_DIR) {
+		pthread_mutex_unlock(&inode_v->lock_inode);
+		return -ENOTDIR;
+	}
+
+	ret = get_fst_dirent_info(inode_v, &fst_dir_info);
+	if (ret) {
+		pthread_mutex_unlock(&inode_v->lock_inode);
+		return ret;
+	}
+
+	bitmap_bits = fst_dir_info.bitmap_size * 4096;
+	fst_dir_info.dir_self_count ++;
+	fst_dir_info.dir_total_count ++;
+
+	dir.inode = ino;
+	log_dbg("father ino %u, subdir ino %u\n", inode_v->i_ino, ino);
+	dir.file_type = VBFS_FT_DIR;
+	strncpy(dir.name, name, NAME_LEN);
+
+	bitmap = fst_dir_info.dentry_bitmap;
+
+	offset = find_zerobit_and_set(bitmap, bitmap_bits, 0);
+	log_dbg("offset %u\n", offset);
+	if (offset != 0) {
+		pos =  inode_v->inode_first_ext + VBFS_DIR_META_SIZE
+			+ (offset + fst_dir_info.bitmap_size - 1) * VBFS_DIR_SIZE;
+		save_dirent((struct vbfs_dirent_disk *) pos, &dir);
+
+		pos = inode_v->inode_first_ext;
+		save_dentry_info((vbfs_dir_meta_dk_t *) pos, &fst_dir_info);
+
+		inode_v->first_ext_status = 2;
+	} else {
+		/* Not Implement */
+		log_err("Not Implement");
+	}
+
+
+	pthread_mutex_unlock(&inode_v->lock_inode);
+
+	return 0;
+}
+
+int vbfs_mkdir(struct inode_vbfs *v_inode_parent, const char *name)
+{
+	int ret = 0;
+	struct inode_vbfs *inode_v = NULL;
+
+	inode_v = vbfs_inode_create(v_inode_parent->i_ino, VBFS_FT_DIR, &ret);
+	if (ret) {
+		return ret;
+	}
+
+	ret = add_dirent(v_inode_parent, name, inode_v->i_ino);
+	if (ret) {
+		vbfs_inode_close(inode_v);
+		return ret;
+	}
+
+	vbfs_inode_close(inode_v);
 
 	return 0;
 }
