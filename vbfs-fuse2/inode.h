@@ -5,7 +5,7 @@
 struct inode_vbfs *vbfs_inode_open(__u32 ino, int *err_no);
 
 /* create inode */
-struct inode_vbfs *vbfs_inode_create(__u32 ino, __u32 mode_t, int *err_no);
+struct inode_vbfs *vbfs_inode_create(__u32 p_ino, __u32 mode_t, int *err_no);
 
 /* writeback to disk */
 int vbfs_inode_sync(struct inode_vbfs *i_vbfs);
@@ -35,6 +35,5 @@ struct inode_vbfs *vbfs_pathname_to_inode(const char *pathname, int *err_no);
 
 int inode_get_first_extend_unlocked(struct inode_vbfs *inode_v);
 
-struct inode_vbfs *vbfs_inode_create(__u32 p_ino, __u32 mode_t, int *err_no);
 
 #endif

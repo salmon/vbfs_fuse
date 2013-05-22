@@ -222,7 +222,6 @@ void init_default_dir(struct inode_vbfs *inode_v, __u32 p_ino)
 
 	/* init default dirent(.)(..) */
 	pos = inode_v->inode_first_ext + VBFS_DIR_META_SIZE + dir_info.bitmap_size * VBFS_DIR_SIZE;
-	log_dbg("offset %u, bitmap_size %u", pos - inode_v->inode_first_ext, dir_info.bitmap_size);
 	memset(&dir, 0, sizeof(dir));
 	dir.inode = inode_v->i_ino;
 	dir.file_type = VBFS_FT_DIR;
@@ -230,7 +229,6 @@ void init_default_dir(struct inode_vbfs *inode_v, __u32 p_ino)
 	save_dirent((struct vbfs_dirent_disk *) pos, &dir);
 
 	pos += VBFS_DIR_SIZE;
-	log_dbg("offset %u", pos - inode_v->inode_first_ext);
 	memset(&dir, 0, sizeof(dir));
 	dir.inode = p_ino;
 	dir.file_type = VBFS_FT_DIR;
@@ -276,6 +274,7 @@ int vbfs_readdir(struct inode_vbfs *inode_v, off_t *filler_pos, fuse_fill_dir_t 
 			return ret;
 
 		fill_stbuf_by_inode(&st, inode_v);
+		log_dbg("ino %u", st.st_ino);
 
 		filler(filler_buf, dentry->name, &st, 0);
 	}
@@ -314,14 +313,12 @@ int add_dirent(struct inode_vbfs *inode_v, const char *name, __u32 ino)
 	fst_dir_info.dir_total_count ++;
 
 	dir.inode = ino;
-	log_dbg("father ino %u, subdir ino %u\n", inode_v->i_ino, ino);
 	dir.file_type = VBFS_FT_DIR;
 	strncpy(dir.name, name, NAME_LEN);
 
 	bitmap = fst_dir_info.dentry_bitmap;
 
 	offset = find_zerobit_and_set(bitmap, bitmap_bits, 0);
-	log_dbg("offset %u\n", offset);
 	if (offset != 0) {
 		pos =  inode_v->inode_first_ext + VBFS_DIR_META_SIZE
 			+ (offset + fst_dir_info.bitmap_size - 1) * VBFS_DIR_SIZE;
