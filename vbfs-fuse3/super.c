@@ -1,8 +1,8 @@
 #include "vbfs-fuse.h"
 #include "super.h"
 #include "log.h"
+#include "extend.h"
 #include "mempool.h"
-#include "direct-io.h"
 
 extern vbfs_fuse_context_t vbfs_ctx;
 static vbfs_superblock_dk_t *vbfs_superblock_disk;
@@ -16,7 +16,7 @@ static void init_vbfs_ctx(int fd)
 	pthread_mutex_init(&vbfs_ctx.lock_super, NULL);
 
 	INIT_LIST_HEAD(&vbfs_ctx.active_inode_list);
-	pthread_mutex_init(&vbfs_ctx.lock_active_inode, NULL);
+	pthread_mutex_init(&vbfs_ctx.active_inode_lock, NULL);
 
 }
 
@@ -66,6 +66,9 @@ static int load_super(void)
 		le32_to_cpu(vbfs_superblock_disk->vbfs_super.s_mount_time);
 	vbfs_ctx.super.s_state =
 		le32_to_cpu(vbfs_superblock_disk->vbfs_super.s_state);
+	if (vbfs_ctx.super.s_state != MOUNT_CLEAN) {
+		log_warning("vbfs not umount cleanly last time\n");
+	}
 
 	memcpy(vbfs_superblock_disk->vbfs_super.uuid,
 		vbfs_ctx.super.uuid, sizeof(vbfs_ctx.super.uuid));
@@ -100,8 +103,8 @@ int init_super(const char *dev_name)
 		goto err;
 
 	vbfs_ctx.super.s_mount_time = time(NULL);
-	vbfs_ctx.super.s_state = 1;
-	vbfs_ctx.super.super_vbfs_dirty = 1;
+	vbfs_ctx.super.s_state = MOUNT_DIRTY;
+	vbfs_ctx.super.super_vbfs_dirty = SUPER_DIRTY;
 
 	vbfs_ctx.super.inode_offset = vbfs_ctx.super.extend_bitmap_offset
 					+ vbfs_ctx.super.extend_bitmap_count;
@@ -126,7 +129,7 @@ static int sync_super_unlocked(void)
 	int fd;
 
 	fd = vbfs_ctx.fd;
-	if (vbfs_ctx.super.super_vbfs_dirty == 0)
+	if (vbfs_ctx.super.super_vbfs_dirty == SUPER_CLEAN)
 		return 0;
 
 	vbfs_superblock_disk->vbfs_super.bad_extend_current =
@@ -146,7 +149,7 @@ static int sync_super_unlocked(void)
 	if (write_to_disk(fd, vbfs_superblock_disk, VBFS_SUPER_OFFSET, VBFS_SUPER_SIZE))
 		return -1;
 
-	vbfs_ctx.super.super_vbfs_dirty = 0;
+	vbfs_ctx.super.super_vbfs_dirty = SUPER_CLEAN;
 		
 	return 0;
 }
@@ -160,4 +163,67 @@ int sync_super(void)
 	pthread_mutex_unlock(&vbfs_ctx.lock_super);
 
 	return ret;
+}
+
+const size_t get_extend_size()
+{
+	return vbfs_ctx.super.s_extend_size;
+}
+
+__u32 get_extend_bm_curr()
+{
+	__u32 bm_offset = 0;
+
+	pthread_mutex_lock(&vbfs_ctx.lock_super);
+	bm_offset = vbfs_ctx.super.extend_bitmap_current
+			+ vbfs_ctx.super.extend_bitmap_offset;
+	pthread_mutex_unlock(&vbfs_ctx.lock_super);
+
+	return bm_offset;
+}
+
+__u32 get_inode_bm_curr()
+{
+	__u32 bm_offset = 0;
+
+	pthread_mutex_lock(&vbfs_ctx.lock_super);
+	bm_offset = vbfs_ctx.super.inode_bitmap_current
+			+ vbfs_ctx.super.inode_bitmap_offset;
+	pthread_mutex_unlock(&vbfs_ctx.lock_super);
+
+	return bm_offset;
+}
+
+__u32 add_extend_bm_curr()
+{
+	__u32 bm_offset = 0;
+
+	pthread_mutex_lock(&vbfs_ctx.lock_super);
+
+	++ vbfs_ctx.super.extend_bitmap_current;
+	vbfs_ctx.super.extend_bitmap_current %=
+			vbfs_ctx.super.extend_bitmap_count;
+	bm_offset = vbfs_ctx.super.extend_bitmap_current
+			+ vbfs_ctx.super.extend_bitmap_offset;
+
+	pthread_mutex_unlock(&vbfs_ctx.lock_super);
+
+	return bm_offset;
+}
+
+__u32 add_inode_bm_curr()
+{
+	__u32 bm_offset = 0;
+
+	pthread_mutex_lock(&vbfs_ctx.lock_super);
+
+	++ vbfs_ctx.super.inode_bitmap_current;
+	vbfs_ctx.super.inode_bitmap_current %=
+			vbfs_ctx.super.inode_bitmap_count;
+	bm_offset = vbfs_ctx.super.inode_bitmap_current
+			+ vbfs_ctx.super.inode_bitmap_offset;
+
+	pthread_mutex_unlock(&vbfs_ctx.lock_super);
+
+	return bm_offset;
 }

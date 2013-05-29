@@ -37,4 +37,8 @@
 #define cpu_to_le64(x)  bswap_64(x)
 #endif
 
+char *pathname_str_sep(char **pathname, const char delim);
+
+int get_lastname(char *pathname, char *last_name, const char delim);
+
 #endif

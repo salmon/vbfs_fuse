@@ -2,6 +2,8 @@
 #include "vbfs-fuse.h"
 #include "log.h"
 
+#if 0
+
 int check_ffs(char *bitmap, __u32 bitmap_bits, __u32 bit)
 {
 	__u32 val = 0;
@@ -115,6 +117,8 @@ __u32 find_zerobit_and_set(char *bitmap, __u32 bitmap_bits, __u32 start_ops)
 
 	return ++offset;
 }
+
+#endif
 
 char *pathname_str_sep(char **pathname, const char delim)
 {

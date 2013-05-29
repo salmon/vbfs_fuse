@@ -5,18 +5,19 @@
 #include "utils.h"
 #include "super.h"
 #include "inode.h"
+#include "extend.h"
+#include "dir.h"
+#include "file.h"
+#include "bitmap.h"
+
+#ifndef CHAR_BIT
+#define CHAR_BIT 8
+#endif
 
 #define PATH_SEP '/'
-#define ROOT_INO 0
 
 #define INTERNAL_ERR 1
 #define DIR_NOT_FOUND 2
-
-typedef enum {
-	UPDATE_ATIME = 1 << 0,
-	UPDATE_MTIME = 1 << 1,
-	UPDATE_CTIME = 1 << 2,
-} time_update_flags;
 
 typedef struct {
 	int fd;
@@ -25,7 +26,12 @@ typedef struct {
 	pthread_mutex_t lock_super;
 
 	struct list_head active_inode_list;
-	pthread_mutex_t lock_active_inode;
+	pthread_mutex_t active_inode_lock;
+
+	struct extend_queue extend_bm_queue;
+	struct extend_queue inode_bm_queue;
+	struct extend_queue inode_queue;
+	struct extend_queue data_queue;
 } vbfs_fuse_context_t;
 
 #endif
