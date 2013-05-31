@@ -16,6 +16,14 @@ typedef enum {
 	UPDATE_CTIME = 1 << 2,
 } time_update_flags;
 
+struct inode_dirents {
+	int ref;
+	int dir_cnt;
+	int status;
+
+	struct list_head dir_list;
+};
+
 struct inode_vbfs {
 	__u32 i_ino;
 	__u32 i_pino;
@@ -28,17 +36,14 @@ struct inode_vbfs {
 
 	__u32 i_extend;
 
-#if 0
-	/* store inode first extend */
-	char *inode_first_ext;
-	int first_ext_status; /* 0 not in buf, 1 clean, 2 dirty*/
-#endif
-
 	int inode_dirty;
 
 	int ref;
 	struct list_head active_list;
 	pthread_mutex_t inode_lock;
+
+	/* only useful when inode type is dir */
+	struct inode_dirents dirent;
 
 	struct list_head data_buf_list;
 };

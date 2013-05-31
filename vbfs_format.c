@@ -23,7 +23,7 @@ static void vbfs_init_paramters()
 	vbfs_params.extend_size_kb = 0;
 	vbfs_params.dev_name = NULL;
 	vbfs_params.total_size = 0;
-	vbfs_params.file_idx_len = 0;
+	vbfs_params.file_idx_len = 256;
 
 	vbfs_params.inode_ratio = 1;
 	vbfs_params.bad_ratio = 2048;

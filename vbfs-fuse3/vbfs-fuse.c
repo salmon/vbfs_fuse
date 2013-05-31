@@ -226,10 +226,10 @@ static int vbfs_fuse_ftruncate(const char *path, off_t size, struct fuse_file_in
 	return 0;
 }
 
-static struct inode_vbfs *vbfs_create_file_fullpath(const char *path, int *err_no)
+static int vbfs_create_file_fullpath(const char *path)
 {
 	int ret = 0;
-	struct inode_vbfs *v_inode_parent = NULL, *inode_v = NULL;
+	struct inode_vbfs *v_inode_parent = NULL;
 	char last_name[NAME_LEN];
 	char *name = NULL;
 	char *pos = NULL;
@@ -237,41 +237,36 @@ static struct inode_vbfs *vbfs_create_file_fullpath(const char *path, int *err_n
 	memset(last_name, 0, sizeof(last_name));
 	name = strdup(path);
 	if (NULL == name) {
-		*err_no = -ENOMEM;
-		return NULL;
+		return -ENOMEM;
 	}
 	pos = name;
 
 	ret = get_lastname(pos, last_name, PATH_SEP);
 	if (ret) {
 		free(name);
-		*err_no = -EINVAL;
-		return NULL;
+		return -EINVAL;
 	}
 	if (strlen(last_name) == 0) {
 		free(name);
-		*err_no = -EEXIST;
-		return NULL;
+		return -EEXIST;
 	}
 
 	v_inode_parent = vbfs_pathname_to_inode(pos, &ret);
 	if (ret) {
-		*err_no = ret;
 		free(name);
-		return NULL;
+		return ret;
 	}
 
 	free(name);
 
-	inode_v = vbfs_create_file(v_inode_parent, last_name);
+	ret = vbfs_create_file(v_inode_parent, last_name);
 	vbfs_inode_update_times(v_inode_parent, UPDATE_ATIME | UPDATE_MTIME);
 	vbfs_inode_close(v_inode_parent);
 	if (ret) {
-		*err_no = ret;
-		return NULL;
+		return ret;
 	}
 
-	return inode_v;
+	return 0;
 }
 
 static int vbfs_fuse_open(const char *path, struct fuse_file_info *fi)
@@ -279,15 +274,23 @@ static int vbfs_fuse_open(const char *path, struct fuse_file_info *fi)
 	int ret = 0;
 	struct inode_vbfs *inode_v = NULL;
 
-	log_dbg("vbfs_fuse_open\n");
+	log_dbg("vbfs_fuse_open %s\n", path);
 
 	inode_v = vbfs_pathname_to_inode(path, &ret);
 	if (-ENOENT == ret) {
 		if (fi->flags & O_CREAT) {
 			/* create file type inode */
-			inode_v = vbfs_create_file_fullpath(path, &ret);
+			ret = vbfs_create_file_fullpath(path);
 			if (ret)
 				return ret;
+
+			inode_v = vbfs_pathname_to_inode(path, &ret);
+			log_err("pathname to inode %u, %d", inode_v->i_ino, ret);
+			if (ret)
+				return ret;
+
+			/* for cache first extend */
+			get_edata_by_inode(inode_v->i_extend, inode_v, &ret);
 		} else
 			return ret;
 	}
@@ -299,7 +302,24 @@ static int vbfs_fuse_open(const char *path, struct fuse_file_info *fi)
 
 static int vbfs_fuse_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 {
-	log_dbg("vbfs_fuse_create\n");
+	int ret = 0;
+	struct inode_vbfs *inode_v = NULL;
+
+	log_dbg("vbfs_fuse_create %s\n", path);
+
+	ret = vbfs_create_file_fullpath(path);
+	if (ret)
+		return ret;
+
+	inode_v = vbfs_pathname_to_inode(path, &ret);
+	log_err("pathname to inode %u, %d", inode_v->i_ino, ret);
+	if (ret)
+		return ret;
+
+	/* for cache first extend */
+	get_edata_by_inode(inode_v->i_extend, inode_v, &ret);
+
+	fi->fh = (uint64_t) inode_v;
 
 	return 0;
 }
@@ -307,17 +327,35 @@ static int vbfs_fuse_create(const char *path, mode_t mode, struct fuse_file_info
 static int vbfs_fuse_read(const char *path, char *buf, size_t size, off_t offset,
 				struct fuse_file_info *fi)
 {
+	int ret = 0;
+	struct inode_vbfs *inode_v = NULL;
+
 	log_dbg("vbfs_fuse_read\n");
 
-	return 0;
+	if (fi->fh) {
+		inode_v = (struct inode_vbfs *) fi->fh;
+		log_err("addr %p", inode_v);
+		ret = vbfs_read_buf(inode_v, buf, size, offset);
+	}
+
+	return ret;
 }
 
 static int vbfs_fuse_write(const char *path, const char *buf, size_t size, off_t offset,
 				struct fuse_file_info *fi)
 {
-	log_dbg("vbfs_fuse_write\n");
+	int ret = 0;
+	struct inode_vbfs *inode_v = NULL;
 
-	return 0;
+	log_dbg("vbfs_fuse_write %s, %u, %d\n", path, size, offset);
+
+	if (fi->fh) {
+		inode_v = (struct inode_vbfs *) fi->fh;
+		log_err("addr %p", inode_v);
+		ret = vbfs_write_buf(inode_v, buf, size, offset);
+	}
+
+	return ret;
 }
 
 static int vbfs_fuse_statfs(const char *path, struct statvfs *stbuf)
@@ -343,6 +381,12 @@ static int vbfs_fuse_release(const char *path, struct fuse_file_info *fi)
 
 	if (fi->fh) {
 		inode_v = (struct inode_vbfs *) fi->fh;
+
+		log_dbg("vbfs_fuse_close %p\n", inode_v);
+
+		/* for release first extend cache */
+		put_edata_by_inode(inode_v->i_extend, inode_v);
+
 		ret = vbfs_inode_close(inode_v);
 		if (ret)
 			return ret;

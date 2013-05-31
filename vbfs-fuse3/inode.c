@@ -106,6 +106,7 @@ static struct inode_vbfs *open_inode(__u32 ino, int *err_no)
 	INIT_LIST_HEAD(&inode_v->active_list);
 	pthread_mutex_init(&inode_v->inode_lock, NULL);
 
+	init_inode_dirent(&inode_v->dirent);
 	INIT_LIST_HEAD(&inode_v->data_buf_list);
 
 	return inode_v;
@@ -259,14 +260,14 @@ static int init_default_fst_extend(struct inode_vbfs *inode_v)
 	int ret = 0;
 
 	if (inode_v->i_mode == VBFS_FT_DIR) {
-		/* init_default_dir() */
-		dir_init_default_fst(inode_v);
+		/* init default dirent */
+		ret = dir_init_default_fst(inode_v);
 	} else {
-		/* init_default_file() */
-		ret = 1;
+		/* init default file idx */
+		ret = file_init_default_fst(inode_v);
 	}
 
-	return 0;
+	return ret;
 }
 
 static struct inode_vbfs *alloc_inode_unlocked(__u32 p_ino, __u32 mode_t, int *err_no)
@@ -326,6 +327,7 @@ static struct inode_vbfs *alloc_inode_unlocked(__u32 p_ino, __u32 mode_t, int *e
 	INIT_LIST_HEAD(&inode_v->active_list);
 	pthread_mutex_init(&inode_v->inode_lock, NULL);
 
+	init_inode_dirent(&inode_v->dirent);
 	INIT_LIST_HEAD(&inode_v->data_buf_list);
 
 	init_default_fst_extend(inode_v);
@@ -362,7 +364,7 @@ static int vbfs_inode_free(struct inode_vbfs *inode_v)
 	pthread_mutex_lock(&inode_v->inode_lock);
 	list_for_each_entry_safe(edata, tmp, &inode_v->data_buf_list, data_list) {
 		if (edata->inode_ref != 0) {
-			log_err("Bug\n");
+			log_err("BUG\n");
 		}
 		ret = close_edata(edata);
 		list_del(&edata->data_list);
@@ -385,6 +387,7 @@ int vbfs_inode_close(struct inode_vbfs *inode_v)
 	struct inode_vbfs *tmp = NULL;
 
 	if (ROOT_INO == inode_v->i_ino) {
+		//vbfs_inode_sync(inode_v);
 		return 0;
 	}
 
@@ -395,6 +398,9 @@ int vbfs_inode_close(struct inode_vbfs *inode_v)
 			pthread_mutex_lock(&inode_v->inode_lock);
 			if (--inode_v->ref == 0) {
 				list_del(&inode_v->active_list);
+				if (VBFS_FT_DIR == inode_v->i_mode) {
+					put_dentry_unlocked(inode_v);
+				}
 				pthread_mutex_unlock(&inode_v->inode_lock);
 				vbfs_inode_free(inode_v);
 			} else {
@@ -410,6 +416,12 @@ int vbfs_inode_close(struct inode_vbfs *inode_v)
 
 int vbfs_inode_sync(struct inode_vbfs *inode_v)
 {
+	if (VBFS_FT_DIR == inode_v->i_mode) {
+		sync_dentry(inode_v);
+	} else if (VBFS_FT_REG_FILE == inode_v->i_mode) {
+		sync_file(inode_v);
+	}
+
 	return 0;
 }
 
@@ -420,28 +432,29 @@ int vbfs_inode_update_times(struct inode_vbfs *v_inode, time_update_flags mask)
 
 int vbfs_inode_lookup_by_name(struct inode_vbfs *v_inode_parent, const char *name, __u32 *ino)
 {
-	struct inode_dirents dirs;
+	struct inode_dirents *dirs = NULL;
 	int ret = 0;
 	struct dentry_vbfs *dentry = NULL;
 	int found = 0;
 
-	dirs.ino = v_inode_parent->i_ino;
-	INIT_LIST_HEAD(&dirs.dir_list);
-
-	ret = get_dentry(v_inode_parent, &dirs.dir_list);
+	ret = get_dentry(v_inode_parent);
 	if (ret)
 		return ret;
 
 	/* processing */
-	list_for_each_entry(dentry, &dirs.dir_list, dentry_list) {
+	dirs = &v_inode_parent->dirent;
+	if (dirs->status == DIR_NOT_READY) {
+		log_err("BUG");
+		return -1;
+	}
+
+	list_for_each_entry(dentry, &dirs->dir_list, dentry_list) {
 		if (0 == strncmp(dentry->name, name, NAME_LEN - 1)) {
 			found = 1;
 			*ino = dentry->inode;
 			break;
 		}
 	}
-
-	put_dentry(&dirs.dir_list);
 
 	if (found) {
 		return 0;
