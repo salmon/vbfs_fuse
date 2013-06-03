@@ -140,6 +140,7 @@ static int writeback_inode(struct inode_vbfs *inode_v)
 		pos = edata->buf + inode_offset;
 
 		save_inode_info(inode_v, (vbfs_inode_dk_t *) pos);
+		edata->status = BUFFER_DIRTY;
 
 		pthread_mutex_unlock(&edata->ed_lock);
 	} else {
@@ -150,6 +151,8 @@ static int writeback_inode(struct inode_vbfs *inode_v)
 	close_edata(edata);
 
 	inode_v->inode_dirty = INODE_CLEAN;
+
+	return 0;
 
 destroy_edata:
 	close_edata(edata);

@@ -358,9 +358,10 @@ static int extend_bm_op_alloc(struct extend_data *edata, __u32 *pextend_no)
 
 	bitmap_set_bit(&bitmap, bit);
 
-	*pextend_no = bm_info.group_no * bits_per_extend + bit;
+	*pextend_no = bm_info.group_no * bits_per_extend + bit + vbfs_ctx.super.inode_offset;
 	bm_info.free_extend --;
-	bm_info.current_position ++;
+	bm_info.current_position = bit;
+	pos = edata->buf;
 	save_extend_bitmap((extend_bitmap_group_dk_t *) pos, &bm_info);
 	edata->status = BUFFER_DIRTY;
 
@@ -378,6 +379,7 @@ static int inode_bm_op_alloc(struct extend_data *edata, __u32 *pinode_no)
 
 	pos = edata->buf;
 	load_inode_bitmap((inode_bitmap_group_dk_t *) pos, &bm_info);
+	log_dbg("extend no %u, free inode %u", edata->extend_no, bm_info.free_inode);
 	if (0 == bm_info.free_inode) {
 		return -1;
 	}
@@ -386,6 +388,7 @@ static int inode_bm_op_alloc(struct extend_data *edata, __u32 *pinode_no)
 	bitmap.bitmap = (__u32 *)(pos + INODE_BITMAP_META_SIZE);
 
 	bit = bitmap_next_clear_bit(&bitmap, bm_info.current_position - 1);
+	log_dbg("%d %u %u", bit, bm_info.current_position, bm_info.total_inode);
 	if (-1 == bit) {
 		bm_info.current_position = 0;
 		save_inode_bitmap((inode_bitmap_group_dk_t *) pos, &bm_info);
@@ -397,7 +400,9 @@ static int inode_bm_op_alloc(struct extend_data *edata, __u32 *pinode_no)
 
 	*pinode_no = bm_info.group_no * bits_per_extend + bit;
 	bm_info.free_inode --;
-	bm_info.current_position ++;
+	log_dbg("extend no %u, free inode %u", edata->extend_no, bm_info.free_inode);
+	bm_info.current_position = bit;
+	pos = edata->buf;
 	save_inode_bitmap((inode_bitmap_group_dk_t *) pos, &bm_info);
 	edata->status = BUFFER_DIRTY;
 
@@ -408,10 +413,14 @@ static int extend_bm_op_free(struct extend_data *edata, __u32 *pextend_no)
 {
 	struct vbfs_bitmap bitmap;
 	struct extend_bitmap_info bm_info;
-	const __u32 ext_no = *pextend_no;
+	__u32 ext_no = *pextend_no;
 	char *pos = NULL;
 
 	memset(&bm_info, 0, sizeof(bm_info));
+	if (ext_no < vbfs_ctx.super.inode_offset) {
+		log_err("BUG");
+	}
+	ext_no -= vbfs_ctx.super.inode_offset;
 
 	pos = edata->buf;
 	load_extend_bitmap((extend_bitmap_group_dk_t *) pos, &bm_info);
@@ -440,6 +449,8 @@ static int inode_bm_op_free(struct extend_data *edata, __u32 *pinode_no)
 	char *pos = NULL;
 
 	memset(&bm_info, 0, sizeof(bm_info));
+
+	log_dbg("%u", *pinode_no);
 
 	pos = edata->buf;
 	load_inode_bitmap((inode_bitmap_group_dk_t *) pos, &bm_info);

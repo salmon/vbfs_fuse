@@ -228,12 +228,12 @@ __u32 add_inode_bm_curr()
 	return bm_offset;
 }
 
-__u32 get_file_idx_len()
+__u32 get_file_idx_size()
 {
-	return &vbfs_ctx.super.s_file_idx_len * 1024;
+	return vbfs_ctx.super.s_file_idx_len * 1024;
 }
 
 __u32 get_file_max_index()
 {
-	return &vbfs_ctx.super.s_file_idx_len * 256;
+	return vbfs_ctx.super.s_file_idx_len * 256;
 }

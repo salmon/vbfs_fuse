@@ -57,6 +57,11 @@ static inline int list_empty(const struct list_head *head)
 	     &pos->member != (head); 					\
 	     pos = n, n = list_entry(n->member.next, typeof(*n), member))
 
+#define list_for_each_entry_continue(pos, head, member) 		\
+	for (pos = list_entry(pos->member.next, typeof(*pos), member);	\
+	     &pos->member != (head);	\
+	     pos = list_entry(pos->member.next, typeof(*pos), member))
+
 static inline void __list_add(struct list_head *new,
 			      struct list_head *prev,
 			      struct list_head *next)

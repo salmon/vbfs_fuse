@@ -128,6 +128,7 @@ int close_edata(struct extend_data *edata)
 	list_del(&edata->rq_list);
 
 	if (BUFFER_DIRTY == edata->status) {
+		log_dbg("write extend %u", edata->extend_no);
 		if(write_extend(edata->extend_no, edata->buf))
 			ret = -EIO;
 	}

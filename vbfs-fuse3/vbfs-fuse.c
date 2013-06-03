@@ -93,9 +93,18 @@ static int vbfs_fuse_getattr(const char *path, struct stat *stbuf)
 static int vbfs_fuse_fgetattr(const char *path, struct stat *stbuf,
 				struct fuse_file_info *fi)
 {
+	int ret = 0;
+	struct inode_vbfs *inode_v = NULL;
+
 	log_dbg("vbfs_fuse_fgetattr\n");
 
-	return 0;
+	if (fi->fh) {
+		inode_v = (struct inode_vbfs *) fi->fh;
+		log_err("addr %p", inode_v);
+		fill_stbuf_by_inode(stbuf, inode_v);
+	}
+
+	return ret;
 }
 
 static int vbfs_fuse_access(const char *path, int mode)
@@ -153,7 +162,7 @@ static int vbfs_fuse_mkdir(const char *path, mode_t mode)
 	char *name = NULL;
 	char *pos = NULL;
 
-	log_dbg("vbfs_fuse_mkdir\n");
+	log_dbg("vbfs_fuse_mkdir %s\n", path);
 
 	memset(last_name, 0, sizeof(last_name));
 	name = strdup(path);
@@ -382,7 +391,7 @@ static int vbfs_fuse_release(const char *path, struct fuse_file_info *fi)
 	if (fi->fh) {
 		inode_v = (struct inode_vbfs *) fi->fh;
 
-		log_dbg("vbfs_fuse_close %p\n", inode_v);
+		log_dbg("vbfs_fuse_close %p, ino %u\n", inode_v, inode_v->i_ino);
 
 		/* for release first extend cache */
 		put_edata_by_inode(inode_v->i_extend, inode_v);
