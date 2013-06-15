@@ -1,0 +1,29 @@
+#include <sys/epoll.h>
+#include <sys/time.h>
+
+static int timer_fd[2] = {-1, -1};
+
+int work_timer_start()
+{
+	return 0;
+}
+
+void work_timer_stop()
+{
+
+}
+
+void add_work()
+{
+
+}
+
+void del_work()
+{
+
+}
+
+static void execute_work()
+{
+
+}

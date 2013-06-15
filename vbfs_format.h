@@ -21,37 +21,12 @@
 #define cpu_to_le64(x)  bswap_64(x)
 #endif
 
-/* Design */
-/* 
- * vbfs layout:
- *     |Superblock|Bad 1|...|Bad k|Inode bitmap 1|...|Inode bitmap j|
- *     |Extend bitmap 1|...|Extend bitmap m|Inode 1|........|Inode o|
- *     |Data 1|.................................|Data n|Super backup|
- * */
-
-/*
- * file type layout in a extend:
- *	|Extend Address Array(256K)|User Data(extendsize - 256K)|
- *	256K can record 8G size
- * */
-
-/*
- * directory type layout in a extend:
- * 	|dirent meta|dirs|
- *	vbfs_dir_entry:
- * 	|self dirent(.)|parent dirent(..)|sub dirent 1|...|sub dirent n|
- * */
-
-
 struct vbfs_paramters {
 	__u32 extend_size_kb;
 	__u64 total_size;
 	char *dev_name;
-	int inode_ratio;
 	int bad_ratio;
 	int file_idx_len;
-
-	__u32 inode_extend_cnt;
 
 	int fd;
 };
@@ -66,7 +41,6 @@ struct vbfs_superblock {
 
 	__u32 s_extend_size;
 	__u32 s_extend_count;
-	__u32 s_inode_count;
 	__u32 s_file_idx_len;
 
 	__u32 bad_count;
@@ -74,15 +48,10 @@ struct vbfs_superblock {
 	__u32 bad_extend_current;
 	__u32 bad_extend_offset;
 
-	/* extend bitmap use extend nums */
-	__u32 extend_bitmap_count; /* depend disk size */
-	__u32 extend_bitmap_current;
-	__u32 extend_bitmap_offset;
-
-	/* inonde bitmap use extend nums */
-	__u32 inode_bitmap_count; /* default 1 */
-	__u32 inode_bitmap_offset;
-	__u32 inode_bitmap_current;
+	/* bitmap use extend nums */
+	__u32 bitmap_count; /* default 1 */
+	__u32 bitmap_offset;
+	__u32 bitmap_current;
 
 	__u32 s_ctime; /* the time of mkfs */
 	__u32 s_mount_time; /* the time of last mount */
@@ -90,21 +59,14 @@ struct vbfs_superblock {
 	__u8 uuid[16];
 };
 
-struct inode_bitmap_group {
+struct bitmap_header {
 	__u32 group_no;
-	__u32 total_inode;
-	__u32 free_inode;
+	__u32 total_cnt;
+	__u32 free_cnt;
 	__u32 current_position;
 };
 
-struct extend_bitmap_group {
-	__u32 group_no;
-	__u32 total_extend;
-	__u32 free_extend;
-	__u32 current_position;
-};
-
-struct vbfs_inode {
+struct vbfs_dirent {
 	__u32 i_ino;
 	__u32 i_pino;
 	__u32 i_mode;
@@ -113,16 +75,12 @@ struct vbfs_inode {
 	__u32 i_ctime;
 	__u32 i_mtime;
 
-	__u32 i_extend;
-};
+	__u32 padding;
 
-struct vbfs_dir_entry {
-	__u32 inode;
-	__u32 file_type;
 	char name[NAME_LEN];
 };
 
-struct dir_metadata {
+struct vbfs_dirent_header {
 	__u32 group_no;
 	__u32 total_extends;
 

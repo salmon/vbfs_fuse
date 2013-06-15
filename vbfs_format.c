@@ -15,6 +15,10 @@
 
 #include "vbfs_format.h"
 
+#ifndef CHAR_BIT
+#define CHAR_BIT 8
+#endif
+
 struct vbfs_paramters vbfs_params;
 struct vbfs_superblock vbfs_superblk;
 
@@ -25,10 +29,7 @@ static void vbfs_init_paramters()
 	vbfs_params.total_size = 0;
 	vbfs_params.file_idx_len = 256;
 
-	vbfs_params.inode_ratio = 1;
 	vbfs_params.bad_ratio = 2048;
-
-	vbfs_params.inode_extend_cnt = 0;
 
 	vbfs_params.fd = -1;
 }
@@ -38,8 +39,6 @@ static void cmd_usage()
 	fprintf(stderr, "Usage: mkfs_vbfs [options] device\n");
 	fprintf(stderr, "[options]\n");
 	fprintf(stderr, "-e assign extend size in KB\n");
-	fprintf(stderr, "-i assign inode nums ratio of extend nums\n");
-	fprintf(stderr, "\t\tdefaut 1:1\n");
 	fprintf(stderr, "-b assign bad ratio of extend nums\n");
 	fprintf(stderr, "\t\tdefaut 1:2048\n");
 	fprintf(stderr, "-x assign file index size of first extend in KB\n");
@@ -47,36 +46,16 @@ static void cmd_usage()
 	exit(1);
 }
 
-static int is_raid_friendly()
+static int is_raid5_friendly()
 {
-#if 0
-	int fd, len;
-	char buf[1024];
-
-	fd = open("/proc/mdstat", O_RDONLY);
-	if (fd < 0) {
-		fprintf(stderr, "open /proc/mdstat error\n");
-		return 0;
-	}
-	while (true) {
-		len = read(fd, buf, sizeof(buf) - 1);
-		if (len <= 0) {
-			break;
-		} else {
-			buf[len] = 0;
-			vbfs_params.dev_name in buf;
-		}
-	}
-	
-	return 1;
-#endif
 	int fd;
 	char name[8], buf[32], attr[128];
 	int chunk_size, raid_disks, stripe_size_kb;
 
 	name[7] = 0;
 	buf[31] = 0;
-	/* not good */
+
+	/* Fix */
 	strncpy(name, vbfs_params.dev_name + 5, sizeof(name) - 1);
 	if (0 == strncmp(name, "md", 2)) {
 		snprintf(attr, sizeof(attr), "/sys/block/%s/md/chunk_size", name);
@@ -112,7 +91,7 @@ static int get_device_info()
 	int fd = 0;
 	struct stat stat_buf;
 
-	fd = open(vbfs_params.dev_name, O_RDWR);
+	fd = open(vbfs_params.dev_name, O_RDWR|O_LARGEFILE);
 	if (fd < 0) {
 		fprintf(stderr, "Can't open %s\n", vbfs_params.dev_name);
 		return -1;
@@ -127,10 +106,10 @@ static int get_device_info()
 	if (S_ISREG(stat_buf.st_mode)) {
 		vbfs_params.total_size = stat_buf.st_size;
 	} else if (S_ISBLK(stat_buf.st_mode)) {
-		if (ioctl(fd, BLKGETSIZE, &vbfs_params.total_size) < 0) {
+		if (ioctl(fd, BLKGETSIZE64, &vbfs_params.total_size) < 0) {
 			fprintf(stderr, "Can't get disk size\n");
 		}
-		if (0 != is_raid_friendly()) {
+		if (0 != is_raid5_friendly()) {
 			fprintf(stderr, "extend size is not a full stripe size\n");
 		}
 	} else {
@@ -143,16 +122,13 @@ static int get_device_info()
 
 static void parse_options(int argc, char **argv)
 {
-	static const char *option_string = "e:i:b:x";
+	static const char *option_string = "e:b:x";
 	int option = 0;
 
 	while ((option = getopt(argc, argv, option_string)) != EOF) {
 		switch (option) {
 			case 'e':
 				vbfs_params.extend_size_kb = atoi(optarg);
-				break;
-			case 'i':
-				vbfs_params.inode_ratio = atoi(optarg);
 				break;
 			case 'b':
 				vbfs_params.bad_ratio = atoi(optarg);
@@ -201,17 +177,19 @@ __u32 calc_div(__u32 dividend, __u32 divisor)
 	return result;
 }
 
-__u32 calc_div_64(__u64 dividend, __u32 divisor)
+static void set_first_bits(char *bitmap, __u32 bit_num)
 {
-	__u32 result = 0;
+	__u32 *bm = 0;
+	__u32 val = 0;
+	__u32 i;
 
-	if (dividend % divisor) {
-		result = dividend / divisor + 1;
-	} else {
-		result = dividend / divisor;
-	}
+	bm = (__u32 *) bitmap;
+	val = le32_to_cpu(*bm);
 
-	return result;
+	for (i = 0; i < bit_num; i++)
+		val |= 1 << i;
+
+	*bm = cpu_to_le32(val);
 }
 
 static int vbfs_prepare_superblock()
@@ -222,13 +200,8 @@ static int vbfs_prepare_superblock()
 	__u32 extend_count = 0;
 	__u32 bad_max_count = 0;
 	__u32 bad_extend_count = 0;
-	__u32 inode_count = 0;
-	__u32 inode_bitmap_cnt = 0;
-	__u32 inode_bitmap_off_t = 0;
-	__u32 extend_bitmap_cnt = 0;
-	__u32 extend_bitmap_off_t = 0;
-
 	__u32 bm_capacity = 0;
+	__u32 bitmap_cnt = 0;
 
 	extend_size = vbfs_params.extend_size_kb * 1024;
 	disk_size = vbfs_params.total_size;
@@ -246,28 +219,9 @@ static int vbfs_prepare_superblock()
 
 	printf("bad use %u extends\n", bad_extend_count);
 
-	inode_count = calc_div(extend_count, vbfs_params.inode_ratio);
-	vbfs_params.inode_extend_cnt = calc_div_64((__u64)inode_count * INODE_SIZE, extend_size);
-	inode_count = vbfs_params.inode_extend_cnt * (extend_size / INODE_SIZE);
-
-	printf("inode total num is %u, use %u extends\n",
-			inode_count, vbfs_params.inode_extend_cnt);
-
-	/* inode bitmap */
-	inode_bitmap_off_t = bad_extend_count + 1;
-	bm_capacity = (extend_size - INODE_BITMAP_META_SIZE) * 8;
-	inode_bitmap_cnt = calc_div(inode_count, bm_capacity);
-
-	printf("inode bitmap use %u extend, position at %u extend\n",
-			inode_bitmap_cnt, inode_bitmap_off_t);
-
-	/* extend bitmap */
-	extend_bitmap_off_t = inode_bitmap_cnt + inode_bitmap_off_t;
-	bm_capacity = (extend_size - EXTEND_BITMAP_META_SIZE) * 8;
-	extend_bitmap_cnt = calc_div(extend_count, bm_capacity);
-
-	printf("extend bitmap use %u extend, position at %u extend\n", 
-			extend_bitmap_cnt, extend_bitmap_off_t);
+	/* bitmap */
+	bm_capacity = (extend_size - BITMAP_META_SIZE) * 8;
+	bitmap_cnt = calc_div(extend_count, bm_capacity);
 
 	memset(&vbfs_superblk, 0, sizeof(vbfs_superblk));
 
@@ -277,8 +231,7 @@ static int vbfs_prepare_superblock()
 	vbfs_superblk.s_magic = VBFS_SUPER_MAGIC;
 	vbfs_superblk.s_extend_size = extend_size;
 	vbfs_superblk.s_extend_count = extend_count;
-	vbfs_superblk.s_inode_count = inode_count;
-	vbfs_superblk.s_file_idx_len = vbfs_params.file_idx_len;
+	vbfs_superblk.s_file_idx_len = vbfs_params.file_idx_len * 1024;
 
 	/* bad extend */
 	vbfs_superblk.bad_count = 0;
@@ -287,15 +240,10 @@ static int vbfs_prepare_superblock()
 	/* first extend is used by superblock*/
 	vbfs_superblk.bad_extend_offset = 1;
 
-	/* extend bitmap */
-	vbfs_superblk.extend_bitmap_count = extend_bitmap_cnt;
-	vbfs_superblk.extend_bitmap_current = 0;
-	vbfs_superblk.extend_bitmap_offset = extend_bitmap_off_t;
-
-	/* inode bitmap */
-	vbfs_superblk.inode_bitmap_count = inode_bitmap_cnt;
-	vbfs_superblk.inode_bitmap_offset = inode_bitmap_off_t;
-	vbfs_superblk.inode_bitmap_current = 0;
+	/* bitmap */
+	vbfs_superblk.bitmap_count = bitmap_cnt;
+	vbfs_superblk.bitmap_offset = bad_extend_count + 1;
+	vbfs_superblk.bitmap_current = 0;
 
 	vbfs_superblk.s_ctime = time(NULL);
 	vbfs_superblk.s_mount_time = 0;
@@ -307,299 +255,10 @@ static int vbfs_prepare_superblock()
 	return 0;
 }
 
-static __u32 get_val(__u32 bit)
-{
-	__u32 val = 0;
-	__u32 tmp = 0;
-
-	if (bit == 0)
-		return ~val;
-
-	assert(! (bit > 64));
-
-	tmp = bit % 4;
-
-	switch (tmp) {
-	case 3:
-		val |= 0x7;
-		break;
-	case 2:
-		val |= 0x3;
-		break;
-	case 1:
-		val |= 0x1;
-		break;
-	case 0:
-		val |= 0xF;
-		break;
-	}
-
-	while (bit > 4) {
-		bit -= 4;
-		val <<= 4;
-		val |= 0xF;
-	}
-
-	return ~val;
-}
-
-static void init_bitmap(char *bitmap, __u32 bitmap_bits, __u32 total_inode)
-{
-	__u32 val = 0;
-	__u32 m = 0, n = 0;
-	char *pos = NULL;
-	__u32 remain = 0;
-	__u32 *bm = 0;
-
-	assert(! (total_inode > bitmap_bits));
-	assert(! (bitmap_bits % 32));
-
-	if (bitmap_bits == total_inode)
-		return;
-
-	if (total_inode == 0) {
-		memset(bitmap, 0xff, bitmap_bits / 8);
-		return;
-	}
-
-	bm = (__u32 *) bitmap;
-
-	m = total_inode % 32;
-	n = total_inode / 32;
-
-	bm += n;
-	val = le32_to_cpu(*bm);
-	val |= get_val(m);
-	*bm = cpu_to_le32(val);
-
-	remain = (bitmap_bits - total_inode) / 32;
-	if (remain) {
-		pos = bitmap + bitmap_bits / 8 - remain * 4;
-		memset(pos, 0xff, remain * 4);
-	}
-}
-
-static void set_first_bits(char *bitmap, __u32 bit_num)
-{
-	__u32 *bm = 0;
-	__u32 val = 0;
-	__u32 i;
-
-	bm = (__u32 *) bitmap;
-	val = le32_to_cpu(*bm);
-
-	for (i = 0; i < bit_num; i++)
-		val |= 1 << i;
-
-	*bm = cpu_to_le32(val);
-
-}
-
-static void inode_bm_meta_to_disk(struct inode_bitmap_group_disk *inode_bm_gp,
-				struct inode_bitmap_group *inode_meta)
-{
-	inode_bm_gp->group_no = inode_meta->group_no;
-	inode_bm_gp->total_inode = inode_meta->total_inode;
-	inode_bm_gp->free_inode = inode_meta->free_inode;
-	inode_bm_gp->current_position = inode_meta->current_position;
-}
-
-static void vbfs_inode_bm_prepare(__u32 group_no, __u32 total_inodes, char *inode_bm_extend)
-{
-	inode_bitmap_group_dk_t inode_bm_dk;
-	struct inode_bitmap_group inode_meta;
-	//char *inode_bm_extend = NULL;
-	char *bitmap_region = NULL;
-	__u32 extend_size;
-	__u32 bitmap_size;
-
-	extend_size = vbfs_params.extend_size_kb * 1024;
-
-	memset(&inode_bm_dk, 0, sizeof(inode_bm_dk));
-	/*
-	if ((inode_bm_extend = valloc(extend_size)) == NULL) {
-		fprintf(stderr, "No memory\n");
-		goto err;
-	}
-	*/
-	memset(inode_bm_extend, 0, extend_size);
-
-	bitmap_size = (extend_size - INODE_BITMAP_META_SIZE) * 8;
-	bitmap_region = inode_bm_extend + INODE_BITMAP_META_SIZE;
-
-	inode_meta.free_inode = total_inodes;
-	inode_meta.total_inode = total_inodes;
-	inode_meta.group_no = group_no;
-	inode_meta.current_position = 0;
-
-	init_bitmap(bitmap_region, bitmap_size, total_inodes);
-
-	if (group_no == 0) {
-		inode_meta.free_inode --;
-		inode_meta.current_position ++;
-		/* one bit for root inode*/
-		set_first_bits(bitmap_region, 1);
-	}
-
-	inode_bm_meta_to_disk(&inode_bm_dk.inode_bm_gp, &inode_meta);
-
-	memcpy(inode_bm_extend, &inode_bm_dk, sizeof(inode_bm_dk));
-}
-
-static void extend_bm_meta_to_disk(struct extend_bitmap_group_disk *extend_bm_gp,
-				struct extend_bitmap_group *extend_meta)
-{
-	extend_bm_gp->group_no = extend_meta->group_no;
-	extend_bm_gp->total_extend = extend_meta->total_extend;
-	extend_bm_gp->free_extend = extend_meta->free_extend;
-	extend_bm_gp->current_position = extend_meta->current_position;
-}
-
-static void vbfs_extend_bm_prepare(__u32 group_no, __u32 total_extends, char *extend_bm_extend)
-{
-	extend_bitmap_group_dk_t extend_bm_dk;
-	struct extend_bitmap_group extend_meta;
-	char *bitmap_region = NULL;
-
-	__u32 extend_size;
-	__u32 bitmap_size;
-
-	extend_size = vbfs_params.extend_size_kb * 1024;
-
-	memset(&extend_bm_dk, 0, sizeof(extend_bm_dk));
-	memset(extend_bm_extend, 0, extend_size);
-
-	bitmap_size = (extend_size - EXTEND_BITMAP_META_SIZE) * 8;
-	bitmap_region = extend_bm_extend + EXTEND_BITMAP_META_SIZE;
-
-	extend_meta.free_extend = total_extends;
-	extend_meta.total_extend = total_extends;
-	extend_meta.group_no = group_no;
-	extend_meta.current_position = 0;
-
-	init_bitmap(bitmap_region, bitmap_size, total_extends);
-
-	if (group_no == 0) {
-		extend_meta.free_extend --;
-		extend_meta.current_position ++;
-		/* one bit for root dentry */
-		set_first_bits(bitmap_region, 1);
-	}
-
-	extend_bm_meta_to_disk(&extend_bm_dk.extend_bm_gp, &extend_meta);
-
-	memcpy(extend_bm_extend, &extend_bm_dk, sizeof(extend_bm_dk));
-}
-
-static void inode_to_disk(struct vbfs_inode_disk *inode_dk,
-			struct vbfs_inode *inode)
-{
-	inode_dk->i_ino = cpu_to_le32(inode->i_ino);
-	inode_dk->i_pino = cpu_to_le32(inode->i_pino);
-	inode_dk->i_mode = cpu_to_le32(inode->i_mode);
-	inode_dk->i_size = cpu_to_le64(inode->i_size);
-	inode_dk->i_atime = cpu_to_le32(inode->i_atime);
-	inode_dk->i_ctime = cpu_to_le32(inode->i_ctime);
-	inode_dk->i_mtime = cpu_to_le32(inode->i_mtime);
-	inode_dk->i_extend = cpu_to_le32(inode->i_extend);
-}
-
-static void prepare_root_inode(char *inode_extend)
-{
-	vbfs_inode_dk_t vbfs_inode_dk;
-	struct vbfs_inode vbfs_root;
-
-	memset(&vbfs_inode_dk, 0, sizeof(vbfs_inode_dk_t));
-
-	vbfs_root.i_ino = 0;
-	vbfs_root.i_pino = 0;
-	vbfs_root.i_mode = VBFS_FT_DIR;
-	vbfs_root.i_size = vbfs_params.extend_size_kb * 1024;
-	vbfs_root.i_atime = time(NULL);
-	vbfs_root.i_ctime = time(NULL);
-	vbfs_root.i_mtime = time(NULL);
-	vbfs_root.i_extend = vbfs_superblk.extend_bitmap_offset
-				+ vbfs_superblk.extend_bitmap_count
-				+ vbfs_params.inode_extend_cnt;
-
-	inode_to_disk(&vbfs_inode_dk.vbfs_inode, &vbfs_root);
-	memcpy(inode_extend, &vbfs_inode_dk, sizeof(vbfs_inode_dk_t));
-}
-
-static void dir_meta_to_disk(struct vbfs_dir_meta_disk *dir_meta_dk,
-				struct dir_metadata *dir_meta)
-{
-	dir_meta_dk->group_no = cpu_to_le32(dir_meta->group_no);
-	dir_meta_dk->total_extends = cpu_to_le32(dir_meta->total_extends);
-
-	dir_meta_dk->dir_self_count = cpu_to_le32(dir_meta->dir_self_count);
-	dir_meta_dk->dir_total_count = cpu_to_le32(dir_meta->dir_total_count);
-
-	dir_meta_dk->next_extend = cpu_to_le32(dir_meta->next_extend);
-	dir_meta_dk->dir_capacity = cpu_to_le32(dir_meta->dir_capacity);
-	dir_meta_dk->bitmap_size = cpu_to_le32(dir_meta->bitmap_size);
-}
-
-static void prepare_root_dentry(char *extend)
-{
-	int extend_size, dir_count;
-	struct dir_metadata dir_meta;
-	struct vbfs_dir_entry dot_and_dotdot;
-	vbfs_dir_meta_dk_t dir_meta_dk;
-	int len;
-	char *pos = NULL, *dir_bitmap = NULL;
-
-	extend_size = vbfs_params.extend_size_kb * 1024;
-	len = sizeof(struct vbfs_dir_entry);
-	memset(extend, 0, extend_size);
-
-	/* init directory metadata */
-	pos = extend;
-
-	dir_meta.group_no = 0;
-	dir_meta.total_extends = 1;
-	dir_meta.dir_self_count = 2;
-	dir_meta.dir_total_count = 2;
-	dir_meta.next_extend = 0;
-	dir_count = (extend_size - VBFS_DIR_META_SIZE) / VBFS_DIR_SIZE;
-	dir_meta.bitmap_size = calc_div(dir_count, 512 * 8);
-	dir_meta.dir_capacity = dir_count - dir_meta.bitmap_size;
-
-	memset(&dir_meta_dk, 0, sizeof(vbfs_dir_meta_dk_t));
-	dir_meta_to_disk(&dir_meta_dk.vbfs_dir_meta, &dir_meta);
-	memcpy(pos, &dir_meta_dk, sizeof(vbfs_dir_meta_dk_t));
-
-	/* init directory bitmap */
-	pos = extend + VBFS_DIR_META_SIZE;
-
-	dir_bitmap = extend + VBFS_DIR_META_SIZE;
-	init_bitmap(dir_bitmap, dir_meta.bitmap_size * 4096, dir_meta.dir_capacity);
-	set_first_bits(dir_bitmap, 2);
-
-	/* init dot(.) */
-	pos = extend + VBFS_DIR_META_SIZE + dir_meta.bitmap_size * 512;
-
-	memset(&dot_and_dotdot, 0, sizeof(dot_and_dotdot));
-	dot_and_dotdot.inode = 0;
-	dot_and_dotdot.file_type = VBFS_FT_DIR;
-	dot_and_dotdot.name[0] = '.';
-	memcpy(pos, &dot_and_dotdot, len);
-
-	/* init dotdot(..) */
-	pos += len;
-
-	memset(&dot_and_dotdot, 0, sizeof(dot_and_dotdot));
-	dot_and_dotdot.inode = 0;
-	dot_and_dotdot.file_type = VBFS_FT_DIR;
-	dot_and_dotdot.name[0] = '.';
-	dot_and_dotdot.name[1] = '.';
-	memcpy(pos, &dot_and_dotdot, len);
-}
-
 int write_to_disk(int fd, void *buf, __u64 offset, size_t len)
 {
 	if (lseek64(fd, offset, SEEK_SET) < 0) {
-		fprintf(stderr, "lseek error %s\n", strerror(errno));
+		fprintf(stderr, "lseek error %llu, %s\n", offset, strerror(errno));
 		return -1;
 	}
 	if (write(fd, buf, len) < 0) {
@@ -621,65 +280,6 @@ static int write_extend(__u32 extend_no, void *buf)
 	}
 
 	return 0;
-}
-
-static int write_root_inode()
-{
-	int ret = 0;
-	char *extend = NULL;
-	int extend_size = 0;
-	int extend_no = 0;
-
-	extend_size = vbfs_params.extend_size_kb * 1024;
-
-	if ((extend = valloc(extend_size)) == NULL) {
-		fprintf(stderr, "No mem\n");
-		return -1;
-	}
-
-	extend_no = vbfs_superblk.extend_bitmap_offset
-			+ vbfs_superblk.extend_bitmap_count;
-
-	prepare_root_inode(extend);
-
-	if (write_extend(extend_no, extend)) {
-		free(extend);
-		return -1;
-	}
-
-	free(extend);
-	return ret;
-}
-
-static int write_root_dentry()
-{
-	int ret = 0;
-	char *extend = NULL;
-	int extend_size = 0;
-	int extend_no = 0;
-
-	extend_size = vbfs_params.extend_size_kb * 1024;
-
-	if ((extend = valloc(extend_size)) == NULL) {
-		fprintf(stderr, "No mem\n");
-		return -1;
-	}
-
-	extend_no = vbfs_superblk.extend_bitmap_offset
-			+ vbfs_superblk.extend_bitmap_count
-			+ vbfs_params.inode_extend_cnt;
-
-	printf("root dirent extend %u\n", extend_no);
-
-	prepare_root_dentry(extend);
-
-	if (write_extend(extend_no, extend)) {
-		free(extend);
-		return -1;
-	}
-
-	free(extend);
-	return ret;
 }
 
 static int write_bad_extend()
@@ -712,97 +312,185 @@ static int write_bad_extend()
 	return ret;
 }
 
-static int write_inode_bitmap()
+static void bitmap_header_to_disk(bitmap_header_dk_t *bm_header_dk, struct bitmap_header *bitmap)
 {
-	int ret = 0;
-	char *extend = NULL;
-	int extend_size = 0;
-	int extend_no = 0;
-	__u32 inodes_total_cnt = 0;
-	__u32 inodes_cnt = 0;
-	__u32 inodes_bm_capacity = 0;
-	__u32 i = 0;
-
-	extend_size = vbfs_params.extend_size_kb * 1024;
-
-	if ((extend = valloc(extend_size)) == NULL) {
-		fprintf(stderr, "No mem\n");
-		return -1;
-	}
-
-	extend_no = vbfs_superblk.inode_bitmap_offset;
-	inodes_total_cnt = vbfs_superblk.s_inode_count;
-	inodes_bm_capacity = (extend_size - INODE_BITMAP_META_SIZE) * 8;
-
-	for (i = 0; i < vbfs_superblk.inode_bitmap_count; i ++) {
-		if (inodes_total_cnt > inodes_bm_capacity * i) {
-			inodes_cnt = inodes_total_cnt - inodes_bm_capacity * i;
-			if (inodes_cnt > inodes_bm_capacity)
-				inodes_cnt = inodes_bm_capacity;
-		} else {
-			inodes_cnt = 0;
-		}
-		vbfs_inode_bm_prepare(i, inodes_cnt, extend);
-
-		if (write_extend(extend_no, extend)) {
-			free(extend);
-			return -1;
-		}
-		extend_no ++;
-	}
-
-	free(extend);
-	return ret;
+	bm_header_dk->bitmap_dk.group_no = cpu_to_le32(bitmap->group_no);
+	bm_header_dk->bitmap_dk.total_cnt = cpu_to_le32(bitmap->total_cnt);
+	bm_header_dk->bitmap_dk.free_cnt = cpu_to_le32(bitmap->free_cnt);
+	bm_header_dk->bitmap_dk.current_position = cpu_to_le32(bitmap->current_position);
 }
 
-static int write_extend_bitmap()
+static void bitmap_prepare(__u32 group_no, __u32 total_cnt, char *buf)
 {
-	int ret = 0;
-	char *extend = NULL;
-	int extend_size = 0;
-	int extend_no = 0;
-	__u32 extends_total_cnt = 0;
-	__u32 extends_cnt = 0;
-	__u32 extends_bm_capacity = 0;
-	__u32 i = 0;
+	bitmap_header_dk_t bm_header_dk;
+	struct bitmap_header bm_header;
+	char *bitmap_region = NULL;
+
+	__u32 extend_size;
 
 	extend_size = vbfs_params.extend_size_kb * 1024;
 
-	if ((extend = valloc(extend_size)) == NULL) {
+	memset(&bm_header_dk, 0, sizeof(bm_header_dk));
+	memset(buf, 0, extend_size);
+
+	bitmap_region = buf + BITMAP_META_SIZE;
+
+	bm_header.free_cnt = total_cnt;
+	bm_header.total_cnt = total_cnt;
+	bm_header.group_no = group_no;
+	bm_header.current_position = 0;
+
+	if (group_no == 0) {
+		bm_header.free_cnt --;
+		bm_header.current_position ++;
+		/* one bit for root dentry */
+		set_first_bits(bitmap_region, 1);
+	}
+
+	bitmap_header_to_disk(&bm_header_dk, &bm_header);
+
+	memcpy(buf, &bm_header_dk, sizeof(bm_header_dk));
+}
+
+static int write_bitmap()
+{
+	char *buf = NULL;
+	int extend_size = 0;
+	int extend_no = 0;
+	__u32 i = 0;
+
+	__u32 count = 0;
+	__u32 one_bm_capacity = 0;
+	__u32 total_cnt = 0;
+
+	extend_size = vbfs_params.extend_size_kb * 1024;
+	/* minus 1 to backup superblock */
+	total_cnt = vbfs_superblk.s_extend_count
+			- vbfs_superblk.bitmap_count
+			- vbfs_superblk.bitmap_offset - 1;
+	one_bm_capacity = (extend_size - BITMAP_META_SIZE) * 8;
+
+	if ((buf = valloc(extend_size)) == NULL) {
 		fprintf(stderr, "No mem\n");
 		return -1;
 	}
 
-	extend_no = vbfs_superblk.extend_bitmap_offset;
+	extend_no = vbfs_superblk.bitmap_offset;
 
-	extends_total_cnt = vbfs_superblk.s_extend_count
-			- vbfs_superblk.extend_bitmap_offset
-			- vbfs_superblk.extend_bitmap_count
-			- vbfs_params.inode_extend_cnt - 1;
-
-	/* fix total extend count */
-	//vbfs_superblock.s_extend_count = extends_total_cnt;
-
-	extends_bm_capacity = (extend_size - EXTEND_BITMAP_META_SIZE) * 8;
-
-	for (i = 0; i < vbfs_superblk.extend_bitmap_count; i ++) {
-		if (extends_total_cnt > extends_bm_capacity * i) {
-			extends_cnt = extends_total_cnt - extends_bm_capacity * i;
-			if (extends_cnt > extends_bm_capacity)
-				extends_cnt = extends_bm_capacity;
-		} else {
-			extends_cnt = 0;
-		}
-		vbfs_extend_bm_prepare(i, extends_cnt, extend);
-		if (write_extend(extend_no, extend)) {
-			free(extend);
+	for (i = 0; i < vbfs_superblk.bitmap_count; i ++) {
+                if (total_cnt > one_bm_capacity * i) {
+                        count = total_cnt - one_bm_capacity * i;
+                        if (count > one_bm_capacity)
+                                count = one_bm_capacity;
+                } else {
+                        count = 0;
+                }
+		bitmap_prepare(i, count, buf);
+		if (write_extend(extend_no, buf)) {
+			free(buf);
 			return -1;
 		}
 		extend_no ++;
 	}
 
-	free(extend);
-	return ret;
+	free(buf);
+	return 0;
+}
+
+static void save_dirent_header(vbfs_dir_header_dk_t *vbfs_header_dk,
+				struct vbfs_dirent_header *dir_header)
+{
+	vbfs_header_dk->vbfs_dir_header.group_no = cpu_to_le32(dir_header->group_no);
+	vbfs_header_dk->vbfs_dir_header.total_extends = cpu_to_le32(dir_header->total_extends);
+	vbfs_header_dk->vbfs_dir_header.dir_self_count = cpu_to_le32(dir_header->dir_self_count);
+	vbfs_header_dk->vbfs_dir_header.dir_total_count = cpu_to_le32(dir_header->dir_total_count);
+	vbfs_header_dk->vbfs_dir_header.next_extend = cpu_to_le32(dir_header->next_extend);
+	vbfs_header_dk->vbfs_dir_header.dir_capacity = cpu_to_le32(dir_header->dir_capacity);
+	vbfs_header_dk->vbfs_dir_header.bitmap_size = cpu_to_le32(dir_header->bitmap_size);
+}
+
+static void save_dirent(struct vbfs_dirent_disk *dirent_dk, struct vbfs_dirent *dir)
+{
+	dirent_dk->i_ino = cpu_to_le32(dir->i_ino);
+	dirent_dk->i_pino = cpu_to_le32(dir->i_pino);
+	dirent_dk->i_mode = cpu_to_le32(dir->i_mode);
+	dirent_dk->i_size = cpu_to_le64(dir->i_size);
+	dirent_dk->i_atime = cpu_to_le32(dir->i_atime);
+	dirent_dk->i_ctime = cpu_to_le32(dir->i_ctime);
+	dirent_dk->i_mtime = cpu_to_le32(dir->i_mtime);
+	dirent_dk->padding = cpu_to_le32(dir->padding);
+	memcpy(dir->name, dirent_dk->name, NAME_LEN);
+}
+
+static void prepare_root_dentry(char *buf)
+{
+	int bitmap_size = 0;
+	int extend_size;
+	int dir_cnt = 0;
+	char *pos = NULL;
+	struct vbfs_dirent_header dir_header;
+	struct vbfs_dirent dirent;
+
+	extend_size = vbfs_params.extend_size_kb * 1024;
+	memset(buf, 0, extend_size);
+	memset(&dirent, 0, sizeof(dirent));
+
+	/* write dir header */
+	dir_cnt = (extend_size - VBFS_DIR_META_SIZE) / VBFS_DIR_SIZE;
+	dir_header.bitmap_size = calc_div(dir_cnt, VBFS_DIR_SIZE * CHAR_BIT);
+	dir_header.dir_capacity = dir_cnt - bitmap_size;
+	dir_header.group_no = 0;
+	dir_header.total_extends = 0;
+	dir_header.dir_self_count = 1;
+	dir_header.dir_total_count = 1;
+	dir_header.next_extend = 0;
+	pos = buf;
+	save_dirent_header((vbfs_dir_header_dk_t *) buf, &dir_header);
+
+	/* write dir bitmap */
+	pos = buf + VBFS_DIR_META_SIZE;
+	set_first_bits(pos, 1);
+
+	/* write dir */
+	dirent.i_ino = ROOT_INO;
+	dirent.i_pino = ROOT_INO;
+	dirent.i_mode = VBFS_FT_DIR;
+	dirent.i_size = extend_size;
+	dirent.i_atime = time(NULL);
+	dirent.i_ctime = time(NULL);
+	dirent.i_mtime = time(NULL);
+	dirent.padding = 0;
+	memset(dirent.name, 0, NAME_LEN);
+	pos = buf + VBFS_DIR_META_SIZE + dir_header.bitmap_size * VBFS_DIR_SIZE;
+	save_dirent((struct vbfs_dirent_disk *) buf, &dirent);
+}
+
+static int write_root_dentry()
+{
+	char *buf = NULL;
+	int extend_size = 0;
+	int extend_no = 0;
+
+	extend_size = vbfs_params.extend_size_kb * 1024;
+
+	if ((buf = valloc(extend_size)) == NULL) {
+		fprintf(stderr, "No mem\n");
+		return -1;
+	}
+
+	extend_no = vbfs_superblk.bitmap_offset + vbfs_superblk.bitmap_count;
+
+	printf("root dirent extend %u\n", extend_no);
+
+	prepare_root_dentry(buf);
+
+	if (write_extend(extend_no, buf)) {
+		free(buf);
+		return -1;
+	}
+
+	free(buf);
+	return 0;
 }
 
 static void superblk_to_disk(struct vbfs_superblock_disk *super_dk,
@@ -812,7 +500,6 @@ static void superblk_to_disk(struct vbfs_superblock_disk *super_dk,
 
 	super_dk->s_extend_size = cpu_to_le32(super->s_extend_size);
 	super_dk->s_extend_count= cpu_to_le32(super->s_extend_count);
-	super_dk->s_inode_count = cpu_to_le32(super->s_inode_count);
 	super_dk->s_file_idx_len = cpu_to_le32(super->s_file_idx_len);
 
 	super_dk->bad_count = cpu_to_le32(super->bad_count);
@@ -820,13 +507,9 @@ static void superblk_to_disk(struct vbfs_superblock_disk *super_dk,
 	super_dk->bad_extend_current = cpu_to_le32(super->bad_extend_current);
 	super_dk->bad_extend_offset = cpu_to_le32(super->bad_extend_offset);
 
-	super_dk->extend_bitmap_count = cpu_to_le32(super->extend_bitmap_count);
-	super_dk->extend_bitmap_current = cpu_to_le32(super->extend_bitmap_current);
-	super_dk->extend_bitmap_offset = cpu_to_le32(super->extend_bitmap_offset);
-
-	super_dk->inode_bitmap_count = cpu_to_le32(super->inode_bitmap_count);
-	super_dk->inode_bitmap_offset = cpu_to_le32(super->inode_bitmap_offset);
-	super_dk->inode_bitmap_current = cpu_to_le32(super->inode_bitmap_current);
+	super_dk->bitmap_count = cpu_to_le32(super->bitmap_count);
+	super_dk->bitmap_offset = cpu_to_le32(super->bitmap_offset);
+	super_dk->bitmap_current = cpu_to_le32(super->bitmap_current);
 
 	super_dk->s_ctime = cpu_to_le32(super->s_ctime);
 	super_dk->s_mount_time = cpu_to_le32(super->s_mount_time);
@@ -865,7 +548,7 @@ static int write_superblock()
 	}
 
 	/* write backup superblock */
-	extend_no = vbfs_superblk.s_extend_count;
+	extend_no = vbfs_superblk.s_extend_count - 1;
 	if (write_extend(extend_no, extend)) {
 		free(extend);
 		return -1;
@@ -881,35 +564,21 @@ static int vbfs_format_device()
 
 	vbfs_prepare_superblock();
 
-	ret = write_root_inode();
-	if (ret < 0) {
-		return -1;
-	}
-
 	ret = write_root_dentry();
-	if (ret < 0) {
+	if (ret < 0)
 		return -1;
-	}
 
 	ret = write_bad_extend();
-	if (ret < 0) {
+	if (ret < 0)
 		return -1;
-	}
 
-	ret = write_inode_bitmap();
-	if (ret < 0) {
+	ret = write_bitmap();
+	if (ret < 0)
 		return -1;
-	}
-
-	ret = write_extend_bitmap();
-	if (ret < 0) {
-		return -1;
-	}
 
 	ret = write_superblock();
-	if (ret < 0) {
+	if (ret < 0)
 		return -1;
-	}
 
 	fsync(vbfs_params.fd);
 	close(vbfs_params.fd);
@@ -922,12 +591,11 @@ int main(int argc, char **argv)
 	vbfs_init_paramters();
 	parse_options(argc, argv);
 
-	if (get_device_info() < 0) {
+	if (get_device_info() < 0)
 		return -1;
-	}
-	if (vbfs_format_device() < 0) {
+
+	if (vbfs_format_device() < 0)
 		return -1;
-	}
 
 	return 0;
 }
