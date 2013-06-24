@@ -1,13 +1,9 @@
 #define FUSE_USE_VERSION 29
 
 #include "vbfs-fuse.h"
+#include "err.h"
+#include "ioengine.h"
 #include "log.h"
-#include "mempool.h"
-#include "super.h"
-#include "inode.h"
-#include "dir.h"
-
-vbfs_fuse_context_t vbfs_ctx;
 
 static int vbfs_fuse_getattr(const char *path, struct stat *stbuf);
 static int vbfs_fuse_fgetattr(const char *path, struct stat *stbuf,
@@ -72,20 +68,18 @@ static struct fuse_operations vbfs_op = {
 
 static int vbfs_fuse_getattr(const char *path, struct stat *stbuf)
 {
-	int ret = 0;
-	struct inode_vbfs *inode_v = NULL;
+	struct inode_info *inode;
 
 	log_dbg("vbfs_fuse_getattr %s\n", path);
 
 	memset(stbuf, 0, sizeof(struct stat));
-	inode_v = vbfs_pathname_to_inode(path, &ret);
-	if (ret) {
-		return ret;
-	}
+	inode = pathname_to_inode(path);
+	if (IS_ERR(inode))
+		return PTR_ERR(inode);
 
-	fill_stbuf_by_inode(stbuf, inode_v);
+	fill_stbuf_by_dirent(stbuf, inode->dirent);
 
-	vbfs_inode_close(inode_v);
+	vbfs_inode_close(inode);
 
 	return 0;
 }
@@ -94,14 +88,13 @@ static int vbfs_fuse_fgetattr(const char *path, struct stat *stbuf,
 				struct fuse_file_info *fi)
 {
 	int ret = 0;
-	struct inode_vbfs *inode_v = NULL;
+	struct inode_info *inode;
 
 	log_dbg("vbfs_fuse_fgetattr\n");
 
 	if (fi->fh) {
-		inode_v = (struct inode_vbfs *) fi->fh;
-		log_err("addr %p", inode_v);
-		fill_stbuf_by_inode(stbuf, inode_v);
+		inode = (struct inode_info *) fi->fh;
+		fill_stbuf_by_dirent(stbuf, inode->dirent);
 	}
 
 	return ret;
@@ -116,7 +109,15 @@ static int vbfs_fuse_access(const char *path, int mode)
 
 static int vbfs_fuse_opendir(const char *path, struct fuse_file_info *fi)
 {
+	struct inode_info *inode = NULL;
+
 	log_dbg("vbfs_fuse_opendir\n");
+
+	inode = pathname_to_inode(path);
+	if (IS_ERR(inode))
+		return PTR_ERR(inode);
+
+	fi->fh = (uint64_t) inode;
 
 	return 0;
 }
@@ -124,38 +125,42 @@ static int vbfs_fuse_opendir(const char *path, struct fuse_file_info *fi)
 static int vbfs_fuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 				off_t offset, struct fuse_file_info *fi)
 {
-	int ret = 0;
-	struct inode_vbfs *inode_v = 0;
-	off_t pos = 0;
+	struct inode_info *inode;
 
 	log_dbg("vbfs_fuse_readdir %s\n", path);
 
-	inode_v = vbfs_pathname_to_inode(path, &ret);
-	if (ret)
-		return ret;
+	if (! fi->fh) {
+		log_err("BUG");
+		return -1;
+	}
 
-	ret = vbfs_readdir(inode_v, &pos, filler, buf);
-	if (ret)
-		return ret;
-
-	vbfs_inode_update_times(inode_v, UPDATE_ATIME);
-
-	ret = vbfs_inode_close(inode_v);
-	if (ret)
-		return ret;
+	inode = (struct inode_info *) fi->fh;
+	vbfs_readdir(inode, offset, filler, buf);
+	vbfs_update_times(inode, UPDATE_ATIME);
 
 	return 0;
 }
 
 static int vbfs_fuse_releasedir(const char *path, struct fuse_file_info *fi)
 {
+	struct inode_info *inode = NULL;
+
 	log_dbg("vbfs_fuse_releasedir\n");
+
+	if (! fi->fh) {
+		log_err("BUG");
+		return -1;
+	}
+
+	inode = (struct inode_info *) fi->fh;
+	vbfs_inode_close(inode);
 
 	return 0;
 }
 
 static int vbfs_fuse_mkdir(const char *path, mode_t mode)
 {
+#if 0
 	int ret = 0;
 	struct inode_vbfs *inode_v = NULL;
 	char last_name[NAME_LEN];
@@ -203,6 +208,7 @@ static int vbfs_fuse_mkdir(const char *path, mode_t mode)
 	}
 
 	free(name);
+#endif
 
 	return 0;
 }
@@ -237,6 +243,7 @@ static int vbfs_fuse_ftruncate(const char *path, off_t size, struct fuse_file_in
 
 static int vbfs_create_file_fullpath(const char *path)
 {
+#if 0
 	int ret = 0;
 	struct inode_vbfs *v_inode_parent = NULL;
 	char last_name[NAME_LEN];
@@ -275,11 +282,13 @@ static int vbfs_create_file_fullpath(const char *path)
 		return ret;
 	}
 
+#endif
 	return 0;
 }
 
 static int vbfs_fuse_open(const char *path, struct fuse_file_info *fi)
 {
+#if 0
 	int ret = 0;
 	struct inode_vbfs *inode_v = NULL;
 
@@ -305,12 +314,14 @@ static int vbfs_fuse_open(const char *path, struct fuse_file_info *fi)
 	}
 
 	fi->fh = (uint64_t) inode_v;
+#endif
 
 	return 0;
 }
 
 static int vbfs_fuse_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 {
+#if 0
 	int ret = 0;
 	struct inode_vbfs *inode_v = NULL;
 
@@ -329,6 +340,7 @@ static int vbfs_fuse_create(const char *path, mode_t mode, struct fuse_file_info
 	get_edata_by_inode(inode_v->i_extend, inode_v, &ret);
 
 	fi->fh = (uint64_t) inode_v;
+#endif
 
 	return 0;
 }
@@ -336,6 +348,7 @@ static int vbfs_fuse_create(const char *path, mode_t mode, struct fuse_file_info
 static int vbfs_fuse_read(const char *path, char *buf, size_t size, off_t offset,
 				struct fuse_file_info *fi)
 {
+#if 0
 	int ret = 0;
 	struct inode_vbfs *inode_v = NULL;
 
@@ -346,13 +359,15 @@ static int vbfs_fuse_read(const char *path, char *buf, size_t size, off_t offset
 		log_err("addr %p", inode_v);
 		ret = vbfs_read_buf(inode_v, buf, size, offset);
 	}
+#endif
 
-	return ret;
+	return 0;
 }
 
 static int vbfs_fuse_write(const char *path, const char *buf, size_t size, off_t offset,
 				struct fuse_file_info *fi)
 {
+#if 0
 	int ret = 0;
 	struct inode_vbfs *inode_v = NULL;
 
@@ -363,8 +378,9 @@ static int vbfs_fuse_write(const char *path, const char *buf, size_t size, off_t
 		log_err("addr %p", inode_v);
 		ret = vbfs_write_buf(inode_v, buf, size, offset);
 	}
+#endif
 
-	return ret;
+	return 0;
 }
 
 static int vbfs_fuse_statfs(const char *path, struct statvfs *stbuf)
@@ -383,20 +399,15 @@ static int vbfs_fuse_flush(const char *path, struct fuse_file_info *fi)
 
 static int vbfs_fuse_release(const char *path, struct fuse_file_info *fi)
 {
-	struct inode_vbfs *inode_v = NULL;
+	struct inode_info *inode;
 	int ret = 0;
 
 	log_dbg("vbfs_fuse_release\n");
 
 	if (fi->fh) {
-		inode_v = (struct inode_vbfs *) fi->fh;
+		inode = (struct inode_info *) fi->fh;
 
-		log_dbg("vbfs_fuse_close %p, ino %u\n", inode_v, inode_v->i_ino);
-
-		/* for release first extend cache */
-		put_edata_by_inode(inode_v->i_extend, inode_v);
-
-		ret = vbfs_inode_close(inode_v);
+		ret = vbfs_inode_close(inode);
 		if (ret)
 			return ret;
 	}
@@ -415,8 +426,8 @@ static void vbfs_fuse_destroy(void *data)
 {
 	log_dbg("vbfs_fuse_destroy\n");
 
-	queue_destroy(vbfs_ctx.meta_queue);
-	queue_destroy(vbfs_ctx.data_queue);
+	queue_destroy(get_meta_queue());
+	queue_destroy(get_data_queue());
 	ioengine->io_exit();
 
 	log_close();
@@ -425,21 +436,30 @@ static void vbfs_fuse_destroy(void *data)
 static void *vbfs_fuse_init(struct fuse_conn_info *conn)
 {
 	int ret;
-	int reserved_bufs;
-	int hash_bits;
 
 	log_dbg("vbfs_fuse_init\n");
 
-	vbfs_ctx.meta_queue = queue_create(resvered_bufs, hash_bits);
-
-	vbfs_ctx.data_queue = queue_create(resvered_bufs, hash_bits);
-	if (IS_ERR(vbfs_ctx.meta_queue) || IS_ERR(vbfs_ctx.data_queue)) {
-		log_err("queue create error\n");
+	ret = meta_queue_create();
+	if (ret) {
+		log_err("meta queue create error\n");
 		exit(1);
 	}
+
+	ret = data_queue_create();
+	if (ret) {
+		log_err("data queue create error\n");
+		exit(1);
+	}
+
 	ret = ioengine->io_init();
 	if (ret) {
 		log_err("io thread init error\n");
+		exit(1);
+	}
+
+	ret = init_root_inode();
+	if (ret < 0) {
+		log_err("root inode init error\n");
 		exit(1);
 	}
 
@@ -468,12 +488,6 @@ int main(int argc, char **argv)
 	i_argc = argc - 1;
 	s_argv = argv;
 	s_argv[argc - 1] = NULL;
-
-	ret = init_root_inode();
-	if (ret < 0) {
-		fprintf(stderr, "root inode init error\n");
-		exit(1);
-	}
 
 	ret = fuse_main(i_argc, s_argv, &vbfs_op, NULL);
 	log_err("fuse_main end\n");

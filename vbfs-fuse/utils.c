@@ -1,3 +1,4 @@
+#include "../vbfs_fs.h"
 #include "utils.h"
 #include "log.h"
 #include "super.h"
@@ -76,7 +77,6 @@ int read_from_disk(int fd, void *buf, uint64_t offset, size_t len)
 
 int write_extend(uint32_t extend_no, void *buf)
 {
-#if 0
 	size_t len = get_extend_size();
 	int fd = get_disk_fd();
 	off64_t offset = (uint64_t)extend_no * len;
@@ -85,14 +85,10 @@ int write_extend(uint32_t extend_no, void *buf)
 		return -1;
 
 	return 0;
-#endif
-	usleep(100000);
-	return 0;
 }
 
 int read_extend(uint32_t extend_no, void *buf)
 {
-#if 0
 	size_t len = get_extend_size();
 	int fd = get_disk_fd();
 	off64_t offset = (uint32_t)extend_no * len;
@@ -100,9 +96,6 @@ int read_extend(uint32_t extend_no, void *buf)
 	if (read_from_disk(fd, buf, offset, len))
 		return -1;
 
-	return 0;
-#endif
-	usleep(400000);
 	return 0;
 }
 
@@ -350,3 +343,67 @@ int bitmap_count_bits(struct vbfs_bitmap *bitmap)
 	return ret;
 }
 
+/*
+ * string operation begin
+ * */
+
+char *pathname_str_sep(char **pathname, const char delim)
+{
+	char *sbegin = *pathname;
+	char *end;
+	char *sc;
+	int found = 0;
+
+	if (sbegin == NULL)
+		return NULL;
+
+	for (sc = sbegin; *sc != '\0'; ++sc) {
+		if (*sc == delim) {
+			found = 1;
+			end = sc;
+			break;
+		}
+	}
+
+	if (! found)
+		end = NULL;
+
+	if (end)
+		*end++ = '\0';
+
+	*pathname = end;
+
+	return sbegin;
+}
+
+int get_lastname(char *pathname, char *last_name, const char delim)
+{
+	int len = 0;
+	char *pos = NULL;
+
+	if (pathname == NULL) {
+		return -1;
+	}
+
+	len = strlen(pathname);
+
+	while (pathname[--len] == delim) {
+		if (len <= 1)
+			return 0;
+
+		pathname[len] = '\0';
+	}
+
+	for (; len >= 0; len --) {
+		if (pathname[len] == delim) {
+			pos = &pathname[len + 1];
+			strncpy(last_name, pos, NAME_LEN - 1);
+
+			pathname[len + 1] = '\0';
+			break;
+		}
+	}
+
+
+	return 0;
+}

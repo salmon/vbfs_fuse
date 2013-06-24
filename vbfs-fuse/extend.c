@@ -131,6 +131,7 @@ static void submit_io(struct extend_buf *b, int rw, end_io_fn_t end_io)
 {
 	b->end_io_fn = end_io;
 	b->rw = rw;
+	b->real_eno = b->eno + b->q->eno_prefix;
 
 	ioengine->io_submit(b);
 }
@@ -323,6 +324,7 @@ static struct extend_buf *__extend_new(struct queue *q, uint32_t eno,
 	b->hold_cnt = 1;
 	b->error = 0;
 	INIT_LIST_HEAD(&b->data_list);
+	INIT_LIST_HEAD(&b->inode_list);
 	pthread_mutex_init(&b->lock, NULL);
 	pthread_cond_init(&b->cond, NULL);
 	__link_buffer(b, eno, LIST_CLEAN);
@@ -422,11 +424,14 @@ void extend_put(struct extend_buf *b)
 	struct queue *q = b->q;
 
 	queue_lock(q);
+
 	BUG_ON(!b->hold_cnt);
+
 	b->hold_cnt--;
 	if (!b->hold_cnt) {
 		pthread_cond_signal(&q->free_buffer_cond);
 	}
+
 	queue_unlock(q);
 }
 
@@ -557,7 +562,7 @@ static void *work_fn(void *args)
 	}
 }
 
-struct queue *queue_create(unsigned int reserved_buffers, int hash_bits)
+struct queue *queue_create(unsigned int reserved_buffers, int hash_bits, uint32_t eno_prefix)
 {
 	struct queue *q;
 	int ret;
@@ -600,6 +605,8 @@ struct queue *queue_create(unsigned int reserved_buffers, int hash_bits)
 		}
 		__free_buffer_wake(b);
 	}
+
+	q->eno_prefix = eno_prefix;
 
 	q->clean_stop = 0;
 	pthread_mutex_init(&q->clean_lock, NULL);

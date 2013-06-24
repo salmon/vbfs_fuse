@@ -4,11 +4,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <dirent.h>
+#include <byteswap.h>
 #include <stdint.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <time.h>
 #include <sys/time.h>
+#include <fuse.h>
 #include <errno.h>
 #include <assert.h>
 
@@ -101,5 +108,8 @@ int bitmap_is_all_set(struct vbfs_bitmap *bitmap);
 int bitmap_next_set_bit(struct vbfs_bitmap *bitmap, int pos);
 int bitmap_next_clear_bit(struct vbfs_bitmap *bitmap, int pos);
 int bitmap_count_bits(struct vbfs_bitmap *bitmap);
+
+char *pathname_str_sep(char **pathname, const char delim);
+int get_lastname(char *pathname, char *last_name, const char delim);
 
 #endif

@@ -24,9 +24,9 @@ static void extend_bufio(struct extend_buf *b)
 	int ret = 0;
 
 	if (WRITE == b->rw) {
-		ret = write_extend(b->eno, b->data);
+		ret = write_extend(b->real_eno, b->data);
 	} else if (READ == b->rw) {
-		ret = read_extend(b->eno, b->data);
+		ret = read_extend(b->real_eno, b->data);
 	} else {
 		b->error = -EINVAL;
 	}

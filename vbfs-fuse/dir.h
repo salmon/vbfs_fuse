@@ -30,35 +30,35 @@ struct vbfs_dirent {
 	uint32_t i_ctime;
 	uint32_t i_mtime;
 
-	char *name;
-};
-
-struct extend {
-	uint32_t eno;
-	struct list_head list;
+	char name[NAME_LEN];
 };
 
 struct inode_info {
 	struct vbfs_dirent *dirent;
 	uint32_t position;
 
-	int inode_dirty;
+	int status;
 	unsigned int flags;
 	int ref;
-	struct list_head active_list;
-	pthread_mutex_t inode_lock;
+	pthread_mutex_t lock;
 
+	struct hlist_node hash_list;
+	struct list_head active_list;
 	struct list_head extend_list;
 };
 
 int init_root_inode(void);
-struct inode_vbfs *get_root_inode(void);
 struct inode_vbfs *vbfs_inode_open(uint32_t ino);
-struct inode_vbfs *alloc_inode(uint32_t p_ino, uint32_t mode_t);
+//struct inode_vbfs *alloc_inode(uint32_t p_ino, uint32_t mode_t);
 int vbfs_inode_sync(struct inode_info *inode);
 int vbfs_inode_close(struct inode_info *inode);
 int vbfs_inode_update_times(struct inode_info *inode, time_update_flags mask);
 int vbfs_inode_lookup_by_name(struct inode_info *v_inode_parent, const char *name);
-struct inode_info *vbfs_pathname_to_inode(const char *pathname);
+struct inode_info *pathname_to_inode(const char *pathname);
+
+void fill_stbuf_by_dirent(struct stat *stbuf, struct vbfs_dirent *dirent);
+int vbfs_update_times(struct inode_info *inode, time_update_flags mask);
+int vbfs_readdir(struct inode_info *inode, off_t filler_pos,
+		fuse_fill_dir_t filler, void *filler_buf);
 
 #endif

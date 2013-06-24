@@ -38,6 +38,8 @@ struct queue {
 	pthread_mutex_t free_buffer_lock;
 
 	pthread_mutex_t lock;
+
+	uint32_t eno_prefix;
 };
 
 typedef void (*end_io_fn_t)(void *args);
@@ -47,6 +49,7 @@ struct extend_buf {
 	struct list_head lru_list;
 
 	uint32_t eno;
+	uint32_t real_eno;
 	char *data;
 
 	int rw;
@@ -63,6 +66,8 @@ struct extend_buf {
 	void *args;
 	struct list_head data_list;
 	struct queue *q;
+
+	struct list_head inode_list;
 };
 
 void *extend_new(struct queue *q, uint32_t eno, struct extend_buf **bp);
@@ -74,7 +79,7 @@ int extend_write_dirty(struct extend_buf *b);
 
 int queue_write_dirty(struct queue *q);
 void queue_write_dirty_async(struct queue *q);
-struct queue *queue_create(unsigned int reserved_buffers, int hash_bits);
+struct queue *queue_create(unsigned int reserved_buffers, int hash_bits, uint32_t eno_prefix);
 void queue_destroy(struct queue *q);
 
 #endif

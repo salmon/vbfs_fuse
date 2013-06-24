@@ -1,21 +1,31 @@
 #include "vbfs-fuse.h"
 #include "super.h"
 #include "log.h"
+#include "err.h"
 #include "extend.h"
-#include "mempool.h"
 
-extern vbfs_fuse_context_t vbfs_ctx;
+static vbfs_fuse_context_t vbfs_ctx;
 static vbfs_superblock_dk_t *vbfs_superblock_disk;
 
-static void init_vbfs_ctx(int fd)
+static int init_vbfs_ctx(int fd)
 {
-	memset(&vbfs_ctx, 0, sizeof(vbfs_ctx));
+	int i;
 
+	memset(&vbfs_ctx, 0, sizeof(vbfs_ctx));
 	vbfs_ctx.fd = fd;
 
-	INIT_LIST_HEAD(&vbfs_ctx.active_inode_list);
-	pthread_mutex_init(&vbfs_ctx.active_inode_lock, NULL);
+	vbfs_ctx.active_i.inode_cache = mp_malloc(sizeof(struct hlist_head) << INODE_HASH_BITS);
+	if (NULL == vbfs_ctx.active_i.inode_cache) {
+		fprintf(stderr, "malloc error, %s\n", strerror(errno));
+		return -1;
+	}
+	for (i = 0; i < 1 << INODE_HASH_BITS; i++)
+		INIT_HLIST_HEAD(&vbfs_ctx.active_i.inode_cache[i]);
 
+	INIT_LIST_HEAD(&vbfs_ctx.active_i.inode_list);
+	pthread_mutex_init(&vbfs_ctx.active_i.lock, NULL);
+
+	return 0;
 }
 
 static int load_super(void)
@@ -55,7 +65,7 @@ static int load_super(void)
 		le32_to_cpu(vbfs_superblock_disk->vbfs_super.s_mount_time);
 	vbfs_ctx.super.s_state =
 		le32_to_cpu(vbfs_superblock_disk->vbfs_super.s_state);
-	if (vbfs_ctx.super.s_state != MOUNT_CLEAN) {
+	if (vbfs_ctx.super.s_state != CLEAN) {
 		log_warning("vbfs not umount cleanly last time\n");
 	}
 
@@ -73,6 +83,7 @@ static int init_bad_extend(void)
 int init_super(const char *dev_name)
 {
 	int fd;
+	int ret;
 
 	pthread_mutex_init(&vbfs_ctx.super.lock, NULL);
 
@@ -85,7 +96,9 @@ int init_super(const char *dev_name)
 		fprintf(stderr, "open %s error, %s\n", dev_name, strerror(errno));
 		goto err;
 	}
-	init_vbfs_ctx(fd);
+	ret = init_vbfs_ctx(fd);
+	if (ret)
+		goto err;
 
 	if (read_from_disk(fd, vbfs_superblock_disk, VBFS_SUPER_OFFSET, VBFS_SUPER_SIZE))
 		goto err;
@@ -115,7 +128,7 @@ static int sync_super_unlocked(void)
 	int fd;
 
 	fd = vbfs_ctx.fd;
-	if (vbfs_ctx.super.super_vbfs_dirty == SUPER_CLEAN)
+	if (vbfs_ctx.super.super_vbfs_dirty == CLEAN)
 		return 0;
 
 	vbfs_superblock_disk->vbfs_super.bad_extend_current =
@@ -149,11 +162,6 @@ int sync_super(void)
 	return ret;
 }
 
-const size_t get_extend_size(void)
-{
-	return vbfs_ctx.super.s_extend_size;
-}
-
 uint32_t get_bitmap_curr(void)
 {
 	uint32_t bm_offset = 0;
@@ -181,12 +189,94 @@ uint32_t add_bitmap_curr(void)
 	return bm_offset;
 }
 
-uint32_t get_file_idx_size(void)
+int meta_queue_create(void)
+{
+	int ret = 0, reserved_bufs, hash_bits;
+
+	if (vbfs_ctx.super.bitmap_count < BM_RESERVED_MAX)
+		reserved_bufs = vbfs_ctx.super.bitmap_count;
+	else
+		reserved_bufs = BM_RESERVED_MAX;
+	hash_bits = 4;
+
+	vbfs_ctx.meta_queue = queue_create(reserved_bufs, hash_bits, 0);
+	if (IS_ERR(vbfs_ctx.meta_queue))
+		ret = PTR_ERR(vbfs_ctx.meta_queue);
+
+	return ret;
+}
+
+int data_queue_create(void)
+{
+	int ret = 0, reserved_bufs, hash_bits;
+	uint32_t data_offset;
+
+	if (vbfs_ctx.super.s_extend_count < DATA_RESERVED_MAX)
+		reserved_bufs = vbfs_ctx.super.s_extend_count;
+	else
+		reserved_bufs = DATA_RESERVED_MAX;
+	hash_bits = 10;
+
+	data_offset = vbfs_ctx.super.bitmap_count + vbfs_ctx.super.bitmap_offset;
+	vbfs_ctx.data_queue = queue_create(reserved_bufs, hash_bits, data_offset);
+	if (IS_ERR(vbfs_ctx.data_queue)) {
+		ret = PTR_ERR(vbfs_ctx.data_queue);
+	}
+
+	return ret;
+}
+
+inline int get_disk_fd(void)
+{
+	return vbfs_ctx.fd;
+}
+
+inline const size_t get_extend_size(void)
+{
+	return vbfs_ctx.super.s_extend_size;
+}
+
+inline uint32_t get_file_idx_size(void)
 {
 	return vbfs_ctx.super.s_file_idx_len;
 }
 
-uint32_t get_file_max_index(void)
+inline uint32_t get_file_max_index(void)
 {
 	return vbfs_ctx.super.s_file_idx_len / 4;
+}
+
+inline struct queue *get_meta_queue(void)
+{
+	return vbfs_ctx.meta_queue;
+}
+
+inline struct queue *get_data_queue(void)
+{
+	return vbfs_ctx.data_queue;
+}
+
+inline struct active_inode *get_active_inode(void)
+{
+	return &vbfs_ctx.active_i;
+}
+
+void init_dir_bm_size(uint32_t dir_bm_size)
+{
+	vbfs_ctx.super.dir_bm_size = dir_bm_size;
+}
+
+void init_dir_capacity(uint32_t dir_capacity)
+{
+	vbfs_ctx.super.dir_capacity = dir_capacity;
+}
+
+inline uint32_t get_dir_bm_size(void)
+{
+	return vbfs_ctx.super.dir_bm_size;
+}
+
+inline uint32_t get_dir_capacity(void)
+{
+	return vbfs_ctx.super.dir_capacity;
 }
