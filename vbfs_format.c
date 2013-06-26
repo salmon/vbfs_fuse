@@ -440,12 +440,12 @@ static void prepare_root_dentry(char *buf)
 	dir_header.bitmap_size = calc_div(dir_cnt, VBFS_DIR_SIZE * CHAR_BIT);
 	dir_header.dir_capacity = dir_cnt - bitmap_size;
 	dir_header.group_no = 0;
-	dir_header.total_extends = 0;
+	dir_header.total_extends = 1;
 	dir_header.dir_self_count = 1;
 	dir_header.dir_total_count = 1;
 	dir_header.next_extend = 0;
 	pos = buf;
-	save_dirent_header((vbfs_dir_header_dk_t *) buf, &dir_header);
+	save_dirent_header((vbfs_dir_header_dk_t *) pos, &dir_header);
 
 	/* write dir bitmap */
 	pos = buf + VBFS_DIR_META_SIZE;
@@ -462,7 +462,7 @@ static void prepare_root_dentry(char *buf)
 	dirent.padding = 0;
 	memset(dirent.name, 0, NAME_LEN);
 	pos = buf + VBFS_DIR_META_SIZE + dir_header.bitmap_size * VBFS_DIR_SIZE;
-	save_dirent((struct vbfs_dirent_disk *) buf, &dirent);
+	save_dirent((struct vbfs_dirent_disk *) pos, &dirent);
 }
 
 static int write_root_dentry()

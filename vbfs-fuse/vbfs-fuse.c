@@ -72,7 +72,6 @@ static int vbfs_fuse_getattr(const char *path, struct stat *stbuf)
 
 	log_dbg("vbfs_fuse_getattr %s\n", path);
 
-	memset(stbuf, 0, sizeof(struct stat));
 	inode = pathname_to_inode(path);
 	if (IS_ERR(inode))
 		return PTR_ERR(inode);
@@ -143,7 +142,7 @@ static int vbfs_fuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler
 
 static int vbfs_fuse_releasedir(const char *path, struct fuse_file_info *fi)
 {
-	struct inode_info *inode = NULL;
+	struct inode_info *inode;
 
 	log_dbg("vbfs_fuse_releasedir\n");
 
@@ -160,9 +159,9 @@ static int vbfs_fuse_releasedir(const char *path, struct fuse_file_info *fi)
 
 static int vbfs_fuse_mkdir(const char *path, mode_t mode)
 {
-#if 0
-	int ret = 0;
-	struct inode_vbfs *inode_v = NULL;
+	int ret;
+	struct inode_info *inode;
+
 	char last_name[NAME_LEN];
 	char *name = NULL;
 	char *pos = NULL;
@@ -171,11 +170,9 @@ static int vbfs_fuse_mkdir(const char *path, mode_t mode)
 
 	memset(last_name, 0, sizeof(last_name));
 	name = strdup(path);
-	if (NULL == name) {
+	if (NULL == name)
 		return -ENOMEM;
-	}
 	pos = name;
-
 	ret = get_lastname(pos, last_name, PATH_SEP);
 	if (ret) {
 		free(name);
@@ -186,36 +183,43 @@ static int vbfs_fuse_mkdir(const char *path, mode_t mode)
 		return -EEXIST;
 	}
 
-	inode_v = vbfs_pathname_to_inode(pos, &ret);
-	if (ret) {
-		free(name);
-		return ret;
-	}
 
-	ret = vbfs_mkdir(inode_v, last_name);
-	if (ret) {
-		vbfs_inode_close(inode_v);
-		free(name);
-		return ret;
-	}
-
-	vbfs_inode_update_times(inode_v, UPDATE_ATIME | UPDATE_MTIME);
-
-	ret = vbfs_inode_close(inode_v);
-	if (ret) {
-		free(name);
-		return ret;
-	}
-
+	inode = pathname_to_inode(pos);
 	free(name);
-#endif
+	if (IS_ERR(inode))
+		return PTR_ERR(inode);
+
+	ret = vbfs_mkdir(inode, last_name);
+	if (ret) {
+		vbfs_inode_close(inode);
+		return ret;
+	}
+
+	vbfs_update_times(inode, UPDATE_ATIME | UPDATE_MTIME);
+	vbfs_inode_close(inode);
 
 	return 0;
 }
 
 static int vbfs_fuse_rmdir(const char *path)
 {
+	int ret;
+	struct inode_info *inode;
+
 	log_dbg("vbfs_fuse_rmdir\n");
+
+	inode = pathname_to_inode(path);
+	if (IS_ERR(inode))
+		return PTR_ERR(inode);
+
+	ret = vbfs_rmdir(inode);
+	if (ret) {
+		vbfs_inode_close(inode);
+		return ret;
+	}
+
+	vbfs_update_times(inode, UPDATE_ATIME | UPDATE_MTIME);
+	vbfs_inode_close(inode);
 
 	return 0;
 }
@@ -478,6 +482,7 @@ int main(int argc, char **argv)
 	}
 
 	log_init();
+	rdwr_register();
 
 	ret = init_super(argv[argc - 1]);
 	if (ret < 0) {

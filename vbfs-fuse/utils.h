@@ -37,6 +37,16 @@
 
 #define BUG_ON(x) assert(!(x))
 
+#ifndef CHAR_BIT
+#define CHAR_BIT 8
+#endif
+
+#define UNIT_SIZE sizeof(uint32_t)
+#define BITS_PER_UNIT (UNIT_SIZE * CHAR_BIT)
+#define UNIT_OFFSET(b) ((b) / BITS_PER_UNIT)
+#define BIT_OFFSET(b) ((b) % BITS_PER_UNIT)
+#define BIT_VALUE(b) ((uint32_t) 1 << BIT_OFFSET(b))
+
 static inline int test_bit(int bit, unsigned int *val)
 {
 	return *val & (1 << bit);

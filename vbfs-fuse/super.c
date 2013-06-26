@@ -106,6 +106,9 @@ int init_super(const char *dev_name)
 	if (load_super())
 		goto err;
 
+	vbfs_ctx.super.bits_bm_capacity =
+			(vbfs_ctx.super.s_extend_size - BITMAP_META_SIZE) * CHAR_BIT;
+
 	vbfs_ctx.super.s_mount_time = time(NULL);
 	vbfs_ctx.super.s_state = DIRTY;
 	vbfs_ctx.super.super_vbfs_dirty = DIRTY;
@@ -183,6 +186,8 @@ uint32_t add_bitmap_curr(void)
 	++ vbfs_ctx.super.bitmap_current;
 	vbfs_ctx.super.bitmap_current %= vbfs_ctx.super.bitmap_count;
 	bm_offset = vbfs_ctx.super.bitmap_current + vbfs_ctx.super.bitmap_offset;
+
+	vbfs_ctx.super.super_vbfs_dirty = DIRTY;
 
 	pthread_mutex_unlock(&vbfs_ctx.super.lock);
 
@@ -279,4 +284,9 @@ inline uint32_t get_dir_bm_size(void)
 inline uint32_t get_dir_capacity(void)
 {
 	return vbfs_ctx.super.dir_capacity;
+}
+
+inline uint32_t get_bitmap_capacity(void)
+{
+	return vbfs_ctx.super.bits_bm_capacity;
 }

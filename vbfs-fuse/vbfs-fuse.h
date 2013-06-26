@@ -5,6 +5,7 @@
 #include "utils.h"
 #include "super.h"
 #include "extend.h"
+#include "bitmap.h"
 #include "dir.h"
 
 #ifndef CHAR_BIT

@@ -81,6 +81,8 @@ int write_extend(uint32_t extend_no, void *buf)
 	int fd = get_disk_fd();
 	off64_t offset = (uint64_t)extend_no * len;
 
+	log_dbg("write extend_no %u\n", extend_no);
+
 	if (write_to_disk(fd, buf, offset, len))
 		return -1;
 
@@ -103,15 +105,6 @@ int read_extend(uint32_t extend_no, void *buf)
 /*
  * bitmap operations begin
  * */
-#ifndef CHAR_BIT
-#define CHAR_BIT 8
-#endif
-
-#define UNIT_SIZE sizeof(uint32_t)
-#define BITS_PER_UNIT (UNIT_SIZE * CHAR_BIT)
-#define UNIT_OFFSET(b) ((b) / BITS_PER_UNIT)
-#define BIT_OFFSET(b) ((b) % BITS_PER_UNIT)
-#define BIT_VALUE(b) ((uint32_t) 1 << BIT_OFFSET(b))
 
 int bitmap_set_bit(struct vbfs_bitmap *bitmap, size_t bit)
 {
