@@ -251,6 +251,11 @@ inline uint32_t get_file_max_index(void)
 	return vbfs_ctx.super.s_file_idx_len / 4;
 }
 
+inline uint32_t get_bitmap_offset(void)
+{
+	return vbfs_ctx.super.bitmap_offset;
+}
+
 inline struct queue *get_meta_queue(void)
 {
 	return vbfs_ctx.meta_queue;

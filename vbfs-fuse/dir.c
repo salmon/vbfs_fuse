@@ -340,16 +340,19 @@ int vbfs_inode_sync(struct inode_info *inode)
 
 int vbfs_inode_close(struct inode_info *inode)
 {
+	uint32_t pino;
+
 	vbfs_inode_sync(inode);
 
 	if (ROOT_INO == inode->dirent->i_ino)
 		return 0;
 
 	active_inode_lock();
+	pino = inode->dirent->i_pino;
 	if (0 == --inode->ref) {
 		free_inode(inode);
 	}
-	inode = __find_active_inode(inode->dirent->i_pino);
+	inode = __find_active_inode(pino);
 	if (NULL == inode) {
 		log_err("BUG");
 		return -1;
@@ -758,12 +761,12 @@ static int __vbfs_create(struct inode_info *inode, char *subname, uint32_t mode)
 	return 0;
 }
 
-int vbfs_mkdir(struct inode_info *inode, char *subname)
+int vbfs_create(struct inode_info *inode, char *subname, uint32_t mode)
 {
 	int ret;
 
 	pthread_mutex_lock(&inode->lock);
-	ret = __vbfs_create(inode, subname, VBFS_FT_DIR);
+	ret = __vbfs_create(inode, subname, mode);
 	pthread_mutex_unlock(&inode->lock);
 
 	return ret;

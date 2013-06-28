@@ -7,6 +7,7 @@
 #include "extend.h"
 #include "bitmap.h"
 #include "dir.h"
+#include "file.h"
 
 #ifndef CHAR_BIT
 #define CHAR_BIT 8

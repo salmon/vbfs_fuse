@@ -43,6 +43,7 @@ inline struct active_inode *get_active_inode(void);
 inline uint32_t get_dir_bm_size(void);
 inline uint32_t get_dir_capacity(void);
 inline uint32_t get_bitmap_capacity(void);
+inline uint32_t get_bitmap_offset(void);
 
 void init_dir_bm_size(uint32_t dir_bm_size);
 void init_dir_capacity(uint32_t dir_capacity);

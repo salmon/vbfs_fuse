@@ -59,7 +59,7 @@ void fill_stbuf_by_dirent(struct stat *stbuf, struct vbfs_dirent *dirent);
 int vbfs_update_times(struct inode_info *inode, time_update_flags mask);
 int vbfs_readdir(struct inode_info *inode, off_t filler_pos,
 		fuse_fill_dir_t filler, void *filler_buf);
-int vbfs_mkdir(struct inode_info *inode, char *subname);
+int vbfs_create(struct inode_info *inode, char *subname, uint32_t mode);
 int vbfs_rmdir(struct inode_info *inode);
 
 #endif
