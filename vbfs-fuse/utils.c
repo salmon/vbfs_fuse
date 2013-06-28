@@ -95,6 +95,8 @@ int read_extend(uint32_t extend_no, void *buf)
 	int fd = get_disk_fd();
 	off64_t offset = (uint32_t)extend_no * len;
 
+	log_dbg("%u", extend_no);
+
 	if (read_from_disk(fd, buf, offset, len))
 		return -1;
 

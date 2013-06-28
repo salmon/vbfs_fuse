@@ -204,6 +204,7 @@ int init_root_inode(void)
 
 	data = buf;
 	load_dirent_header((vbfs_dir_header_dk_t *) data, &root_header);
+
 	init_dir_bm_size(root_header.bitmap_size);
 	init_dir_capacity(root_header.dir_capacity);
 
@@ -671,6 +672,8 @@ static int __vbfs_parent_fill_dir(uint32_t data_no, uint32_t pino, char *subname
 	init_dirent(&dir, ino, pino, mode);
 	strncpy(dir.name, subname, NAME_LEN - 1);
 	save_dirent((struct vbfs_dirent_disk *) data_pos, &dir);
+	log_dbg("new inode no is %u, pos is %u", ino, pos);
+	bitmap_set_bit(&bm, pos);
 
 	extend_mark_dirty(b);
 	extend_write_dirty(b);

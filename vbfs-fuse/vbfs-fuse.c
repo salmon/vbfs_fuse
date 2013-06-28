@@ -166,8 +166,6 @@ static int vbfs_create_obj(const char *path, uint32_t mode)
 	char *name = NULL;
 	char *pos = NULL;
 
-	log_dbg("vbfs_fuse_mkdir %s\n", path);
-
 	memset(last_name, 0, sizeof(last_name));
 	name = strdup(path);
 	if (NULL == name)
@@ -204,6 +202,8 @@ static int vbfs_create_obj(const char *path, uint32_t mode)
 static int vbfs_fuse_mkdir(const char *path, mode_t mode)
 {
 	int ret;
+
+	log_dbg("vbfs_fuse_mkdir %s\n", path);
 
 	ret = vbfs_create_obj(path, VBFS_FT_DIR);
 
