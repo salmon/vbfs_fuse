@@ -16,6 +16,7 @@ static int vbfs_fuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler
 static int vbfs_fuse_releasedir(const char *path, struct fuse_file_info *fi);
 static int vbfs_fuse_mkdir(const char *path, mode_t mode);
 static int vbfs_fuse_rmdir(const char *path);
+static int vbfs_fuse_unlink(const char *path);
 
 static int vbfs_fuse_rename(const char *from, const char *to);
 static int vbfs_fuse_truncate(const char *path, off_t size);
@@ -45,6 +46,7 @@ static struct fuse_operations vbfs_op = {
 	.releasedir	= vbfs_fuse_releasedir,
 	.mkdir		= vbfs_fuse_mkdir,
 	.rmdir		= vbfs_fuse_rmdir,
+	.unlink		= vbfs_fuse_unlink,
 
 	.rename		= vbfs_fuse_rename,
 	.truncate	= vbfs_fuse_truncate,
@@ -70,7 +72,7 @@ static int vbfs_fuse_getattr(const char *path, struct stat *stbuf)
 {
 	struct inode_info *inode;
 
-	log_dbg("vbfs_fuse_getattr %s\n", path);
+	//log_dbg("vbfs_fuse_getattr %s\n", path);
 
 	inode = pathname_to_inode(path);
 	if (IS_ERR(inode))
@@ -89,7 +91,7 @@ static int vbfs_fuse_fgetattr(const char *path, struct stat *stbuf,
 	int ret = 0;
 	struct inode_info *inode;
 
-	log_dbg("vbfs_fuse_fgetattr\n");
+	//log_dbg("vbfs_fuse_fgetattr %s\n", path);
 
 	if (fi->fh) {
 		inode = (struct inode_info *) fi->fh;
@@ -110,7 +112,7 @@ static int vbfs_fuse_opendir(const char *path, struct fuse_file_info *fi)
 {
 	struct inode_info *inode = NULL;
 
-	log_dbg("vbfs_fuse_opendir\n");
+	log_dbg("vbfs_fuse_opendir %s\n", path);
 
 	inode = pathname_to_inode(path);
 	if (IS_ERR(inode))
@@ -144,7 +146,7 @@ static int vbfs_fuse_releasedir(const char *path, struct fuse_file_info *fi)
 {
 	struct inode_info *inode;
 
-	log_dbg("vbfs_fuse_releasedir\n");
+	log_dbg("vbfs_fuse_releasedir %s\n", path);
 
 	if (! fi->fh) {
 		log_err("BUG");
@@ -210,30 +212,85 @@ static int vbfs_fuse_mkdir(const char *path, mode_t mode)
 	return ret;
 }
 
+/*
+ * fuse_lib:
+ * 	opendir -> rmdir -> releasedir
+ * 	but rmdir don't has fuse_file_info argument
+ * 	so it implemented by a strange way.
+ * */
 static int vbfs_fuse_rmdir(const char *path)
 {
-	log_dbg("vbfs_fuse_rmdir\n");
+	int ret;
+	struct inode_info *inode;
 
-	return 0;
+	log_dbg("vbfs_fuse_rmdir %s\n", path);
+
+	inode = pathname_to_inode(path);
+	if (IS_ERR(inode))
+		return PTR_ERR(inode);
+
+	ret = vbfs_rmdir(inode);
+
+	return ret;
+}
+
+static int vbfs_fuse_unlink(const char *path)
+{
+	int ret;
+	struct inode_info *inode;
+
+	log_dbg("vbfs_fuse_unlink %s\n", path);
+
+	inode = pathname_to_inode(path);
+	if (IS_ERR(inode))
+		return PTR_ERR(inode);
+
+	ret = vbfs_unlink(inode);
+
+	return ret;
 }
 
 static int vbfs_fuse_rename(const char *from, const char *to)
 {
-	log_dbg("vbfs_fuse_rename\n");
+	log_dbg("vbfs_fuse_rename from %s, to %s\n", from, to);
 
 	return 0;
 }
 
 static int vbfs_fuse_truncate(const char *path, off_t size)
 {
+	int ret;
+	struct inode_info *inode;
+
 	log_dbg("vbfs_fuse_truncate\n");
+
+	inode = pathname_to_inode(path);
+	if (IS_ERR(inode))
+		return PTR_ERR(inode);
+
+	ret = vbfs_truncate(inode, size);
+	vbfs_inode_close(inode);
+	if (ret)
+		return -1;
 
 	return 0;
 }
 
 static int vbfs_fuse_ftruncate(const char *path, off_t size, struct fuse_file_info *fi)
 {
+	int ret;
+	struct inode_info *inode;
+
 	log_dbg("vbfs_fuse_ftruncate\n");
+
+
+	if (fi->fh) {
+		inode = (struct inode_info *) fi->fh;
+		ret = vbfs_truncate(inode, size);
+		if (ret)
+			return -1;
+		//vbfs_update_times(inode, UPDATE_ATIME);
+	}
 
 	return 0;
 }
@@ -258,13 +315,7 @@ static int vbfs_fuse_open(const char *path, struct fuse_file_info *fi)
 
 			inode = pathname_to_inode(path);
 			if (IS_ERR(inode))
-				ret = PTR_ERR(inode);
-			else
-				ret = 0;
-
-			log_err("pathname to inode %u, %d", inode->dirent->i_ino, ret);
-			if (ret)
-				return ret;
+				return PTR_ERR(inode);
 		} else
 			return ret;
 	}
@@ -276,7 +327,7 @@ static int vbfs_fuse_open(const char *path, struct fuse_file_info *fi)
 
 static int vbfs_fuse_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 {
-	int ret = 0;
+	int ret;
 	struct inode_info *inode;
 
 	log_dbg("vbfs_fuse_create %s\n", path);
@@ -287,11 +338,7 @@ static int vbfs_fuse_create(const char *path, mode_t mode, struct fuse_file_info
 
 	inode = pathname_to_inode(path);
 	if (IS_ERR(inode))
-		ret = PTR_ERR(inode);
-
-	log_dbg("pathname to inode %u, %d", inode->dirent->i_ino, ret);
-	if (ret)
-		return ret;
+		return PTR_ERR(inode);
 
 	fi->fh = (uint64_t) inode;
 
@@ -304,11 +351,10 @@ static int vbfs_fuse_read(const char *path, char *buf, size_t size, off_t offset
 	int ret = 0;
 	struct inode_info *inode;
 
-	log_dbg("vbfs_fuse_read\n");
-
 	if (fi->fh) {
 		inode = (struct inode_info *) fi->fh;
 		ret = vbfs_read_buf(inode, buf, size, offset);
+		//vbfs_update_times(inode, UPDATE_ATIME);
 	}
 
 	return ret;
@@ -320,11 +366,12 @@ static int vbfs_fuse_write(const char *path, const char *buf, size_t size, off_t
 	int ret = 0;
 	struct inode_info *inode;
 
-	log_dbg("vbfs_fuse_write %s, %u, %d\n", path, size, offset);
+	//log_dbg("%s, %u, %d\n", path, size, offset);
 
 	if (fi->fh) {
 		inode = (struct inode_info *) fi->fh;
 		ret = vbfs_write_buf(inode, buf, size, offset);
+		//vbfs_update_times(inode, UPDATE_ATIME | UPDATE_MTIME);
 	}
 
 	return ret;
@@ -349,7 +396,7 @@ static int vbfs_fuse_release(const char *path, struct fuse_file_info *fi)
 	struct inode_info *inode;
 	int ret = 0;
 
-	log_dbg("vbfs_fuse_release\n");
+	log_dbg("vbfs_fuse_release %s\n", path);
 
 	if (fi->fh) {
 		inode = (struct inode_info *) fi->fh;

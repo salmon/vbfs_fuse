@@ -4,10 +4,10 @@
 #include "../vbfs_fs.h"
 #include "utils.h"
 #include "super.h"
-#include "extend.h"
-#include "bitmap.h"
 #include "dir.h"
+#include "extend.h"
 #include "file.h"
+#include "bitmap.h"
 
 #ifndef CHAR_BIT
 #define CHAR_BIT 8

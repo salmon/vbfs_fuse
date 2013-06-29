@@ -14,6 +14,7 @@ void init_bitmap(struct vbfs_bitmap *bitmap, uint32_t total_bits);
 
 int alloc_extend_bitmap(uint32_t *extend_no);
 int free_extend_bitmap(const uint32_t extend_no);
+int free_extend_bitmap_async(const uint32_t extend_no);
 //int free_extends(struct inode_info *inode);
 
 #endif

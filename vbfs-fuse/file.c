@@ -104,7 +104,10 @@ int __vbfs_read_buf(struct inode_info *inode, char *buf, size_t size, off_t offs
 			need_cache = 1;
 			tocopy = buf_size;
 		} else {
-			need_cache = 0;
+			if (buf_off < get_extend_size())
+				need_cache = 1;
+			else
+				need_cache = 0;
 			tocopy = get_extend_size() - buf_off % get_extend_size();
 		}
 
@@ -136,9 +139,11 @@ int vbfs_read_buf(struct inode_info *inode, char *buf, size_t size, off_t offset
 	return ret;
 }
 
-static int is_need_alloc(uint64_t size)
+static int is_need_alloc(uint64_t size, off_t buf_off)
 {
-	if ((size -  get_file_idx_size()) % get_extend_size())
+	if (size > (buf_off - get_file_idx_size()))
+		return 0;
+	if (buf_off % get_extend_size())
 		return 0;
 
 	return 1;
@@ -154,7 +159,7 @@ int __vbfs_write_buf(struct inode_info *inode, const char *buf, size_t size, off
 	size_t wt_len = 0;
 	uint64_t max_size;
 
-	log_dbg("size %u, offset %llu", size, offset);
+	//log_dbg("size %u, offset %llu", size, offset);
 
 	max_size = (__u64) get_file_max_index() * get_extend_size();
 
@@ -174,7 +179,7 @@ int __vbfs_write_buf(struct inode_info *inode, const char *buf, size_t size, off
 				return PTR_ERR(data);
 		} else {
 			index = buf_off / get_extend_size() - 1;
-			if (is_need_alloc(inode->dirent->i_size))
+			if (is_need_alloc(inode->dirent->i_size, buf_off))
 				ret = __alloc_ebuf_by_file_idx(inode, index, &b);
 			else
 				ret = __rd_ebuf_by_file_idx(inode, index, &b);
@@ -188,7 +193,10 @@ int __vbfs_write_buf(struct inode_info *inode, const char *buf, size_t size, off
 			fill = 0;
 		} else {
 			tocopy = get_extend_size() - buf_off % get_extend_size();
-			fill = 1;
+			if (buf_off < get_extend_size())
+				fill = 0;
+			else
+				fill = 1;
 		}
 
 		pos = data + buf_off % get_extend_size();
@@ -213,7 +221,7 @@ int __vbfs_write_buf(struct inode_info *inode, const char *buf, size_t size, off
 		}
 	}
 
-	log_err("i_size %u, write size %u", inode->dirent->i_size, wt_len + offset);
+	//log_err("i_size %u, write size %u", inode->dirent->i_size, wt_len + offset);
 
 	return wt_len;
 }

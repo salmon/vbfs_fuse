@@ -2,12 +2,17 @@
 #define __INODE_H__
 
 #include "utils.h"
+#include "list.h"
 
 typedef enum {
 	UPDATE_ATIME = 1 << 0,
 	UPDATE_MTIME = 1 << 1,
 	UPDATE_CTIME = 1 << 2,
 } time_update_flags;
+
+enum {
+	INODE_REMOVE = 1 << 0,
+};
 
 struct vbfs_dirent_header {
 	uint32_t group_no;
@@ -35,6 +40,7 @@ struct vbfs_dirent {
 
 struct inode_info {
 	struct vbfs_dirent *dirent;
+	uint32_t data_no;
 	uint32_t position;
 
 	int status;
@@ -60,6 +66,8 @@ int vbfs_update_times(struct inode_info *inode, time_update_flags mask);
 int vbfs_readdir(struct inode_info *inode, off_t filler_pos,
 		fuse_fill_dir_t filler, void *filler_buf);
 int vbfs_create(struct inode_info *inode, char *subname, uint32_t mode);
+int vbfs_truncate(struct inode_info *inode, off_t size);
 int vbfs_rmdir(struct inode_info *inode);
+int vbfs_unlink(struct inode_info *inode);
 
 #endif

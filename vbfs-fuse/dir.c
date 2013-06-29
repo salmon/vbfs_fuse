@@ -135,7 +135,8 @@ static struct inode_info *find_active_inode(const uint32_t ino)
 	return inode;
 }
 
-static struct inode_info *__alloc_inode(struct vbfs_dirent *dir, int pos)
+static struct inode_info *__alloc_inode(struct vbfs_dirent *dir,
+					int pos, const uint32_t data_no)
 {
 	struct inode_info *inode;
 	struct vbfs_dirent *dir_tmp; 
@@ -147,6 +148,7 @@ static struct inode_info *__alloc_inode(struct vbfs_dirent *dir, int pos)
 	dir_tmp = mp_malloc(sizeof(*dir_tmp));
 	memcpy(dir_tmp, dir, sizeof(struct vbfs_dirent));
 	inode->dirent = dir_tmp;
+	inode->data_no = data_no;
 	inode->position = pos;
 	inode->status = CLEAN;
 	inode->flags = 0;
@@ -157,7 +159,8 @@ static struct inode_info *__alloc_inode(struct vbfs_dirent *dir, int pos)
 	return inode;
 }
 
-static struct inode_info *__get_inode_by_dirent(struct vbfs_dirent *dir, int pos)
+static struct inode_info *__get_inode_by_dirent(struct vbfs_dirent *dir,
+					int pos, const uint32_t data_no)
 {
 	struct inode_info *inode;
 
@@ -167,7 +170,7 @@ static struct inode_info *__get_inode_by_dirent(struct vbfs_dirent *dir, int pos
 		return inode;
 	}
 
-	inode = __alloc_inode(dir, pos);
+	inode = __alloc_inode(dir, pos, data_no);
 	if (IS_ERR(inode))
 		return inode;
 
@@ -176,12 +179,13 @@ static struct inode_info *__get_inode_by_dirent(struct vbfs_dirent *dir, int pos
 	return inode;
 }
 
-static struct inode_info *get_inode_by_dirent(struct vbfs_dirent *dir, int pos)
+static struct inode_info *get_inode_by_dirent(struct vbfs_dirent *dir,
+					int pos, const uint32_t data_no)
 {
 	struct inode_info *inode;
 
 	active_inode_lock();
-	inode = __get_inode_by_dirent(dir, pos);
+	inode = __get_inode_by_dirent(dir, pos, data_no);
 	active_inode_unlock();
 
 	return inode;
@@ -207,6 +211,7 @@ int init_root_inode(void)
 
 	init_dir_bm_size(root_header.bitmap_size);
 	init_dir_capacity(root_header.dir_capacity);
+	log_err("%u %u\n", root_header.bitmap_size, root_header.dir_capacity);
 
 	data = buf + VBFS_DIR_META_SIZE +
 			VBFS_DIR_SIZE * (get_dir_bm_size() + pos);
@@ -214,7 +219,7 @@ int init_root_inode(void)
 
 	extend_put(b);
 
-	inode = __alloc_inode(&root_dir, pos);
+	inode = __alloc_inode(&root_dir, pos, ROOT_INO);
 	if (IS_ERR(inode)) {
 		ret = PTR_ERR(inode);
 		return ret;
@@ -242,7 +247,8 @@ int vbfs_update_times(struct inode_info *inode, time_update_flags mask)
 	return 0;
 }
 
-static struct inode_info *__open_inode(char *buf, const char *subname, int is_root)
+static struct inode_info *__open_inode(char *buf, const uint32_t data_no,
+				const char *subname, int is_root)
 {
 	int pos;
 	struct vbfs_bitmap bm;
@@ -254,9 +260,9 @@ static struct inode_info *__open_inode(char *buf, const char *subname, int is_ro
 	bm.bitmap = (uint32_t *)(buf + VBFS_DIR_META_SIZE);
 
 	if (is_root)
-		pos = 1;
-	else
 		pos = 0;
+	else
+		pos = -1;
 
 	while (1) {
 		pos = bitmap_next_set_bit(&bm, pos);
@@ -267,7 +273,7 @@ static struct inode_info *__open_inode(char *buf, const char *subname, int is_ro
 		load_dirent((struct vbfs_dirent_disk *) data, &dir);
 
 		if (strncmp(dir.name, subname, NAME_LEN - 1) == 0) {
-			inode = get_inode_by_dirent(&dir, pos);
+			inode = get_inode_by_dirent(&dir, pos, data_no);
 			return inode;
 		}
 	}
@@ -304,7 +310,8 @@ static int __writeback_inode(struct inode_info *inode)
 	if (CLEAN == inode->status)
 		return 0;
 
-	data_no = inode->dirent->i_pino;
+	data_no = inode->data_no;
+	log_dbg("%u %u", data_no, inode->position);
 	buf = extend_read(get_data_queue(), data_no, &b);
 	if (IS_ERR(buf)) {
 		ret = PTR_ERR(buf);
@@ -339,11 +346,41 @@ int vbfs_inode_sync(struct inode_info *inode)
 	return 0;
 }
 
+int vbfs_inode_release(struct inode_info *inode)
+{
+	uint32_t pino;
+	int ref, i;
+
+	pino = inode->dirent->i_pino;
+	ref = inode->ref;
+
+	pthread_mutex_destroy(&inode->lock);
+	mp_free(inode->dirent);
+	mp_free(inode);
+
+	active_inode_lock();
+	inode = __find_active_inode(pino);
+	if (NULL == inode) {
+		log_err("BUG");
+		active_inode_unlock();
+		return -1;
+	}
+	active_inode_unlock();
+
+	for (i = 0; i < ref; i ++)
+		vbfs_inode_close(inode);
+
+	return 0;
+}
+
 int vbfs_inode_close(struct inode_info *inode)
 {
 	uint32_t pino;
 
-	vbfs_inode_sync(inode);
+	if (inode->flags & INODE_REMOVE) {
+		return vbfs_inode_release(inode);
+	} else
+		vbfs_inode_sync(inode);
 
 	if (ROOT_INO == inode->dirent->i_ino)
 		return 0;
@@ -356,6 +393,7 @@ int vbfs_inode_close(struct inode_info *inode)
 	inode = __find_active_inode(pino);
 	if (NULL == inode) {
 		log_err("BUG");
+		active_inode_unlock();
 		return -1;
 	}
 	active_inode_unlock();
@@ -388,9 +426,9 @@ static int __readdir_by_inode(struct inode_info *inode, off_t filler_pos,
 		load_dirent_header((vbfs_dir_header_dk_t *) data, &dir_header);
 		if (dir_header.dir_self_count) {
 			if (ROOT_INO == data_no)
-				pos = 1;
-			else
 				pos = 0;
+			else
+				pos = -1;
 
 			/* readdir */
 			init_bitmap(&bm, get_dir_capacity());
@@ -462,7 +500,7 @@ static struct inode_info *__inode_lookup_by_name(struct inode_info *inode_parent
 				is_root = 0;
 
 			/* lookup */
-			inode = __open_inode(data, subname, is_root);
+			inode = __open_inode(data, data_no, subname, is_root);
 			if (IS_ERR(inode)) {
 				ret = PTR_ERR(inode);
 				if (ret != -ENOENT)
@@ -483,7 +521,7 @@ static struct inode_info *__inode_lookup_by_name(struct inode_info *inode_parent
 			return ERR_PTR(-ENOENT);
 	}
 
-	return 0;
+	return ERR_PTR(-ENOENT);
 
 err:
 	if (need_put)
@@ -650,7 +688,7 @@ static int __vbfs_parent_fill_dir(uint32_t data_no, uint32_t pino, char *subname
 	init_bitmap(&bm, get_dir_capacity());
 	bm.bitmap = (uint32_t *)(data + VBFS_DIR_META_SIZE);
 
-	pos = bitmap_next_clear_bit(&bm, 0);
+	pos = bitmap_next_clear_bit(&bm, -1);
 	if (pos < 0) {
 		log_err("BUG");
 		return -EINVAL;
@@ -672,7 +710,7 @@ static int __vbfs_parent_fill_dir(uint32_t data_no, uint32_t pino, char *subname
 	init_dirent(&dir, ino, pino, mode);
 	strncpy(dir.name, subname, NAME_LEN - 1);
 	save_dirent((struct vbfs_dirent_disk *) data_pos, &dir);
-	log_dbg("new inode no is %u, pos is %u", ino, pos);
+	log_dbg("%u, new inode no is %u, pos is %u", data_no, ino, pos);
 	bitmap_set_bit(&bm, pos);
 
 	extend_mark_dirty(b);
@@ -693,6 +731,8 @@ static int __vbfs_create(struct inode_info *inode, char *subname, uint32_t mode)
 	struct vbfs_dirent_header dir_header, dir_header_tmp;
 
 	data_no = inode->dirent->i_ino;
+	if (inode->dirent->i_mode != VBFS_FT_DIR)
+		return -ENOTDIR;
 
 	while (1) {
 		data = extend_read(get_data_queue(), data_no, &ebuf);
@@ -702,9 +742,9 @@ static int __vbfs_create(struct inode_info *inode, char *subname, uint32_t mode)
 		load_dirent_header((vbfs_dir_header_dk_t *) data, &dir_header);
 
 		if (ROOT_INO == data_no)
-			pos = 1;
-		else
 			pos = 0;
+		else
+			pos = -1;
 
 		if (dir_header.dir_self_count < get_dir_capacity()) {
 			has_room = 1;
@@ -745,8 +785,8 @@ static int __vbfs_create(struct inode_info *inode, char *subname, uint32_t mode)
 			return ret;
 		}
 
-		ret = __vbfs_parent_fill_dir(new_data_no,inode->dirent->i_ino,
-						subname, &dir_header_tmp, 1, mode);
+		ret = __vbfs_parent_fill_dir(new_data_no, inode->dirent->i_ino,
+					subname, &dir_header_tmp, 1, mode);
 
 		dir_header.next_extend = new_data_no;
 		data_pos = ebuf->data;
@@ -775,8 +815,166 @@ int vbfs_create(struct inode_info *inode, char *subname, uint32_t mode)
 	return ret;
 }
 
+int __vbfs_truncate(struct inode_info *inode, off_t size)
+{
+	struct extend_buf *b;
+	char *data;
+	uint32_t offset, data_no, fst_data_len;
+	uint32_t *start_off, *p_idx;
+	int i, j;
+	uint64_t tmp;
+
+	if (inode->dirent->i_size <= size)
+		return 0;
+
+	inode->dirent->i_size = size;
+	inode->status = DIRTY;
+
+	fst_data_len = get_extend_size() - get_file_idx_size();
+
+	if (inode->dirent->i_size <= fst_data_len)
+		return 0;
+
+	data = extend_read(get_data_queue(), inode->dirent->i_ino, &b);
+	if (IS_ERR(data))
+		return PTR_ERR(data);
+
+	/*   */
+	if (size > fst_data_len) {
+		tmp = inode->dirent->i_size - size;
+		if (tmp % get_extend_size())
+			i = tmp / get_extend_size() + 1;
+		else
+			i = tmp / get_extend_size();
+	} else
+		i = 0;
+
+	start_off = (uint32_t *) data;
+	start_off += i;
+
+	tmp = inode->dirent->i_size - fst_data_len;
+	if (tmp % get_extend_size())
+		j = tmp / get_extend_size() + 1;
+	else
+		j = tmp / get_extend_size();
+	offset = j - i;
+	for (i = 0; i < offset; i ++) {
+		p_idx = start_off + i;
+		data_no = le32_to_cpu(*p_idx);
+		free_extend_bitmap_async(data_no);
+	}
+
+	queue_write_dirty(get_meta_queue());
+	extend_put(b);
+
+	return 0;
+}
+
+int vbfs_truncate(struct inode_info *inode, off_t size)
+{
+	int ret;
+
+	pthread_mutex_lock(&inode->lock);
+	ret = __vbfs_truncate(inode, size);
+	pthread_mutex_unlock(&inode->lock);
+
+	vbfs_inode_sync(inode);
+
+	return ret;
+}
+
+static int __vbfs_check_empty(struct inode_info *inode)
+{
+	struct extend_buf *b;
+	char *data;
+	struct vbfs_dirent_header dir_header;
+	uint32_t data_no;
+
+	data_no = inode->dirent->i_ino;
+
+	while (1) {
+		data = extend_read(get_data_queue(), data_no, &b);
+		if (IS_ERR(data))
+			return PTR_ERR(data);
+
+		load_dirent_header((vbfs_dir_header_dk_t *) data, &dir_header);
+		extend_put(b);
+		if (dir_header.dir_self_count)
+			return -1;
+		if (dir_header.next_extend == 0)
+			break;
+		else
+			data_no = dir_header.next_extend;
+	}
+
+	return 0;
+}
+
+static int __vbfs_remove_inode(struct inode_info *inode)
+{
+	int ret = 0;
+	struct extend_buf *b;
+	char *data;
+	uint32_t data_no;
+	struct vbfs_dirent_header dir_header;
+	struct vbfs_bitmap bm;
+
+	data_no = inode->data_no;
+	data = extend_read(get_data_queue(), data_no, &b);
+	if (IS_ERR(data)) {
+		ret = PTR_ERR(data);
+		return ret;
+	}
+
+	load_dirent_header((vbfs_dir_header_dk_t *) data, &dir_header);
+	if (dir_header.dir_self_count --) {
+		/* a lot of work todo */
+	}
+
+	init_bitmap(&bm, get_dir_capacity());
+	bm.bitmap = (uint32_t *)(data + VBFS_DIR_META_SIZE);
+	log_dbg("%u data_no %u pos %u", inode->dirent->i_ino, data_no, inode->position);
+	bitmap_clear_bit(&bm, inode->position);
+
+	save_dirent_header((vbfs_dir_header_dk_t *) data, &dir_header);
+
+	extend_mark_dirty(b);
+	extend_write_dirty(b);
+	extend_put(b);
+
+	return 0;
+}
+
+static int __vbfs_remove(struct inode_info *inode)
+{
+	struct inode_info *parent;
+
+	free_extend_bitmap(inode->dirent->i_pino);
+	/* Fix */
+	__unlink_active_inode(inode);
+	inode->flags |= INODE_REMOVE;
+
+	parent = __find_active_inode(inode->dirent->i_pino);
+
+	pthread_mutex_lock(&parent->lock);
+	__vbfs_remove_inode(parent);
+	pthread_mutex_unlock(&parent->lock);
+
+	return 0;
+}
+
 static int __vbfs_rmdir(struct inode_info *inode)
 {
+	if (inode->ref > 2 || inode->dirent->i_ino == ROOT_INO)
+		return -EBUSY;
+
+	/* check is empty */
+	if (__vbfs_check_empty(inode))
+		return -ENOTEMPTY;
+
+	/* remove inode */
+	__vbfs_remove(inode);
+
 	return 0;
 }
 
@@ -784,10 +982,44 @@ int vbfs_rmdir(struct inode_info *inode)
 {
 	int ret;
 
-	pthread_mutex_lock(&inode->lock);
+	if (inode->dirent->i_mode != VBFS_FT_DIR)
+		return -ENOTDIR;
+
+	active_inode_lock();
 	ret = __vbfs_rmdir(inode);
-	pthread_mutex_unlock(&inode->lock);
+	active_inode_unlock();
 
 	return ret;
 }
 
+int __vbfs_unlink(struct inode_info *inode)
+{
+	int ret;
+
+	if (inode->ref > 1)
+		return -EBUSY;
+
+	/* truncate file */
+	ret = vbfs_truncate(inode, 0);
+	if (ret)
+		return ret;
+
+	/* remove inode */
+	__vbfs_remove(inode);
+
+	return 0;
+}
+
+int vbfs_unlink(struct inode_info *inode)
+{
+	int ret;
+
+	if (inode->dirent->i_mode == VBFS_FT_DIR)
+		return -EISDIR;
+
+	active_inode_lock();
+	ret = __vbfs_unlink(inode);
+	active_inode_unlock();
+
+	return ret;
+}

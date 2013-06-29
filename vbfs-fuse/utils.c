@@ -81,7 +81,7 @@ int write_extend(uint32_t extend_no, void *buf)
 	int fd = get_disk_fd();
 	off64_t offset = (uint64_t)extend_no * len;
 
-	log_dbg("write extend_no %u\n", extend_no);
+	log_dbg("%u", extend_no);
 
 	if (write_to_disk(fd, buf, offset, len))
 		return -1;
