@@ -1,7 +1,7 @@
 #!/bin/sh
 make
 
-../vbfs_format -e 673 /dev/vdd
+#../vbfs_format -e 673 /dev/vdd
 
 ./vbfs_fuse /mnt /dev/vdd
 ls -al /mnt

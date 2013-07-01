@@ -69,5 +69,6 @@ int vbfs_create(struct inode_info *inode, char *subname, uint32_t mode);
 int vbfs_truncate(struct inode_info *inode, off_t size);
 int vbfs_rmdir(struct inode_info *inode);
 int vbfs_unlink(struct inode_info *inode);
+int vbfs_rename(struct inode_info *inode, const char *to);
 
 #endif

@@ -4,6 +4,8 @@
 
 void fill_stbuf_by_dirent(struct stat *stbuf, struct vbfs_dirent *dirent)
 {
+	uint32_t extends;
+
 	memset(stbuf, 0, sizeof(struct stat));
 
 	stbuf->st_ino = dirent->i_ino;
@@ -19,6 +21,13 @@ void fill_stbuf_by_dirent(struct stat *stbuf, struct vbfs_dirent *dirent)
 	stbuf->st_atime = dirent->i_atime;
 	stbuf->st_mtime = dirent->i_mtime;
 	stbuf->st_ctime = dirent->i_ctime;
+	stbuf->st_blksize = get_extend_size();
+	if (dirent->i_size % get_extend_size())
+		extends = dirent->i_size / get_extend_size() + 1;
+	else
+		extends = dirent->i_size / get_extend_size();
+
+	stbuf->st_blocks = extends * get_extend_size() / 512;
 }
 
 static void active_inode_lock()
@@ -1001,4 +1010,16 @@ int vbfs_unlink(struct inode_info *inode)
 	active_inode_unlock();
 
 	return ret;
+}
+
+int vbfs_rename(struct inode_info *inode, const char *to)
+{
+	pthread_mutex_lock(&inode->lock);
+	//strncpy(inode->dirent->name, to, NAME_LEN - 1);
+	inode->status = DIRTY;
+	pthread_mutex_unlock(&inode->lock);
+
+	vbfs_inode_sync(inode);
+
+	return 0;
 }

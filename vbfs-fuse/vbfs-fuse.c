@@ -72,7 +72,7 @@ static int vbfs_fuse_getattr(const char *path, struct stat *stbuf)
 {
 	struct inode_info *inode;
 
-	//log_dbg("vbfs_fuse_getattr %s\n", path);
+	log_dbg("vbfs_fuse_getattr %s\n", path);
 
 	inode = pathname_to_inode(path);
 	if (IS_ERR(inode))
@@ -91,7 +91,7 @@ static int vbfs_fuse_fgetattr(const char *path, struct stat *stbuf,
 	int ret = 0;
 	struct inode_info *inode;
 
-	//log_dbg("vbfs_fuse_fgetattr %s\n", path);
+	log_dbg("vbfs_fuse_fgetattr %s\n", path);
 
 	if (fi->fh) {
 		inode = (struct inode_info *) fi->fh;
@@ -252,7 +252,19 @@ static int vbfs_fuse_unlink(const char *path)
 
 static int vbfs_fuse_rename(const char *from, const char *to)
 {
+	int ret;
+	struct inode_info *inode;
+
 	log_dbg("vbfs_fuse_rename from %s, to %s\n", from, to);
+
+	inode = pathname_to_inode(from);
+	if (IS_ERR(inode))
+		return PTR_ERR(inode);
+
+	ret = vbfs_rename(inode, to);
+	vbfs_inode_close(inode);
+	if (ret)
+		return ret;
 
 	return 0;
 }
@@ -379,7 +391,7 @@ static int vbfs_fuse_write(const char *path, const char *buf, size_t size, off_t
 
 static int vbfs_fuse_statfs(const char *path, struct statvfs *stbuf)
 {
-	log_dbg("vbfs_fuse_statfs\n");
+	log_dbg("vbfs_fuse_statfs %s\n", path);
 
 	return 0;
 }
