@@ -61,13 +61,15 @@ static int __alloc_ebuf_by_file_idx(struct inode_info *inode, int idx, struct ex
 		return ret;
 	}
 	data = extend_new(get_data_queue(), data_no, bp);
-	extend_put(b);
-	if (IS_ERR(data))
+	if (IS_ERR(data)) {
+		extend_put(b);
 		return PTR_ERR(data);
+	}
 
 	*p_index = cpu_to_le32(data_no);
 	extend_mark_dirty(b);
 	extend_write_dirty(b);
+	extend_put(b);
 
 	return 0;
 }

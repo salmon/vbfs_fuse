@@ -386,9 +386,18 @@ static int vbfs_fuse_statfs(const char *path, struct statvfs *stbuf)
 
 static int vbfs_fuse_flush(const char *path, struct fuse_file_info *fi)
 {
-	log_dbg("vbfs_fuse_flush\n");
+	int ret = 0;
+	struct inode_info *inode;
 
-	return 0;
+	log_dbg("vbfs_fuse_flush %s\n", path);
+
+	if (fi->fh) {
+		inode = (struct inode_info *) fi->fh;
+		vbfs_update_times(inode, UPDATE_ATIME | UPDATE_MTIME);
+		ret = sync_file(inode);
+	}
+
+	return ret;
 }
 
 static int vbfs_fuse_release(const char *path, struct fuse_file_info *fi)
@@ -411,9 +420,18 @@ static int vbfs_fuse_release(const char *path, struct fuse_file_info *fi)
 
 static int vbfs_fuse_fsync(const char *path, int isdatasync, struct fuse_file_info *fi)
 {
+	int ret = 0;
+	struct inode_info *inode;
+
 	log_dbg("vbfs_fuse_fsync\n");
 
-	return 0;
+	if (fi->fh) {
+		inode = (struct inode_info *) fi->fh;
+		vbfs_update_times(inode, UPDATE_ATIME | UPDATE_MTIME);
+		ret = sync_file(inode);
+	}
+
+	return ret;
 }
 
 static void vbfs_fuse_destroy(void *data)

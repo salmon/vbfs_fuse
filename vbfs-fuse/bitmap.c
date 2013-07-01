@@ -47,6 +47,7 @@ static int __alloc_bitmap_by_ebuf(struct extend_buf *b)
 	bm.bitmap = (__u32 *)(buf + BITMAP_META_SIZE);
 
 	pos = bm_header.current_position - 1;
+	//log_dbg("pos %d, header pos %d, free_cnt %d", pos, bm_header.current_position, bm_header.free_cnt);
 	ret = bitmap_next_clear_bit(&bm, pos);
 	if (-1 != ret) {
 		bm_header.free_cnt --;
@@ -89,7 +90,7 @@ int __alloc_extend_bitmap(uint32_t *extend_no)
 
 	while (1) {
 		ret = __alloc_bitmap(curr_no);
-		log_err("currno %u, %d\n", curr_no, ret);
+		//log_dbg("currno %u, %d\n", curr_no, ret);
 		if (ret >= 0) {
 			*extend_no = (curr_no - get_bitmap_offset()) * get_bitmap_capacity() + ret;
 			return 0;
@@ -100,7 +101,7 @@ int __alloc_extend_bitmap(uint32_t *extend_no)
 	}
 
 	ret = __alloc_bitmap(curr_no);
-	log_err("currno %u, %d\n", curr_no, ret);
+	//log_dbg("currno %u, %d\n", curr_no, ret);
 	if (ret >= 0) {
 		*extend_no = (curr_no - get_bitmap_offset())* get_bitmap_capacity() + ret;
 		return 0;

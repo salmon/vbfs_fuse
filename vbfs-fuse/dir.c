@@ -117,8 +117,10 @@ static struct inode_info *__find_active_inode(const uint32_t ino)
 
 	hlist_for_each_entry(inode, &active_i->inode_cache[INODE_HASH(ino)],
 				hash_list) {
-		if (ino == inode->dirent->i_ino)
-			return inode;
+		if (ino == inode->dirent->i_ino) {
+			if (! inode->flags & INODE_REMOVE)
+				return inode;
+		}
 	}
 
 	return NULL;
@@ -272,6 +274,7 @@ static struct inode_info *__open_inode(char *buf, const uint32_t data_no,
 				VBFS_DIR_SIZE * (get_dir_bm_size() + pos);
 		load_dirent((struct vbfs_dirent_disk *) data, &dir);
 
+		//log_dbg("dir.name %s, subname %s, pos %d", dir.name, subname, pos);
 		if (strncmp(dir.name, subname, NAME_LEN - 1) == 0) {
 			inode = get_inode_by_dirent(&dir, pos, data_no);
 			return inode;
@@ -311,7 +314,7 @@ static int __writeback_inode(struct inode_info *inode)
 		return 0;
 
 	data_no = inode->data_no;
-	log_dbg("%u %u", data_no, inode->position);
+	//log_dbg("%u %u", data_no, inode->position);
 	buf = extend_read(get_data_queue(), data_no, &b);
 	if (IS_ERR(buf)) {
 		ret = PTR_ERR(buf);
@@ -346,40 +349,11 @@ int vbfs_inode_sync(struct inode_info *inode)
 	return 0;
 }
 
-int vbfs_inode_release(struct inode_info *inode)
-{
-	uint32_t pino;
-	int ref, i;
-
-	pino = inode->dirent->i_pino;
-	ref = inode->ref;
-
-	pthread_mutex_destroy(&inode->lock);
-	mp_free(inode->dirent);
-	mp_free(inode);
-
-	active_inode_lock();
-	inode = __find_active_inode(pino);
-	if (NULL == inode) {
-		log_err("BUG");
-		active_inode_unlock();
-		return -1;
-	}
-	active_inode_unlock();
-
-	for (i = 0; i < ref; i ++)
-		vbfs_inode_close(inode);
-
-	return 0;
-}
-
 int vbfs_inode_close(struct inode_info *inode)
 {
 	uint32_t pino;
 
-	if (inode->flags & INODE_REMOVE) {
-		return vbfs_inode_release(inode);
-	} else
+	if (! inode->flags & INODE_REMOVE)
 		vbfs_inode_sync(inode);
 
 	if (ROOT_INO == inode->dirent->i_ino)
@@ -387,9 +361,8 @@ int vbfs_inode_close(struct inode_info *inode)
 
 	active_inode_lock();
 	pino = inode->dirent->i_pino;
-	if (0 == --inode->ref) {
+	if (0 == --inode->ref)
 		free_inode(inode);
-	}
 	inode = __find_active_inode(pino);
 	if (NULL == inode) {
 		log_err("BUG");
@@ -787,21 +760,22 @@ static int __vbfs_create(struct inode_info *inode, char *subname, uint32_t mode)
 
 		ret = __vbfs_parent_fill_dir(new_data_no, inode->dirent->i_ino,
 					subname, &dir_header_tmp, 1, mode);
+		goto err;
 
 		dir_header.next_extend = new_data_no;
 		data_pos = ebuf->data;
 		save_dirent_header((vbfs_dir_header_dk_t *) data_pos, &dir_header);
 		extend_mark_dirty(ebuf);
 		extend_write_dirty(ebuf);
-	} else {
+	} else
 		ret = __vbfs_parent_fill_dir(data_no_mk, inode->dirent->i_ino,
 						subname, &dir_header_tmp, 0, mode);
 
-	}
 
+err:
 	extend_put(ebuf);
 
-	return 0;
+	return ret;
 }
 
 int vbfs_create(struct inode_info *inode, char *subname, uint32_t mode)
@@ -827,11 +801,9 @@ int __vbfs_truncate(struct inode_info *inode, off_t size)
 	if (inode->dirent->i_size <= size)
 		return 0;
 
-	inode->dirent->i_size = size;
-	inode->status = DIRTY;
-
 	fst_data_len = get_extend_size() - get_file_idx_size();
 
+	log_dbg("size %llu, fst %u", inode->dirent->i_size, fst_data_len);
 	if (inode->dirent->i_size <= fst_data_len)
 		return 0;
 
@@ -858,14 +830,19 @@ int __vbfs_truncate(struct inode_info *inode, off_t size)
 	else
 		j = tmp / get_extend_size();
 	offset = j - i;
+	log_dbg("size %llu, offset %u", inode->dirent->i_size, offset);
 	for (i = 0; i < offset; i ++) {
 		p_idx = start_off + i;
 		data_no = le32_to_cpu(*p_idx);
+		log_dbg("data_no %u", data_no);
 		free_extend_bitmap_async(data_no);
 	}
 
 	queue_write_dirty(get_meta_queue());
 	extend_put(b);
+
+	inode->dirent->i_size = size;
+	inode->status = DIRTY;
 
 	return 0;
 }
@@ -947,26 +924,28 @@ static int __vbfs_remove_inode(struct inode_info *inode)
 
 static int __vbfs_remove(struct inode_info *inode)
 {
-	struct inode_info *parent;
+	//struct inode_info *parent;
 
 	free_extend_bitmap(inode->dirent->i_pino);
 	/* Fix */
-	__unlink_active_inode(inode);
+	//__unlink_active_inode(inode);
 	inode->flags |= INODE_REMOVE;
 
-	parent = __find_active_inode(inode->dirent->i_pino);
+	//parent = __find_active_inode(inode->dirent->i_pino);
 
-	pthread_mutex_lock(&parent->lock);
-	__vbfs_remove_inode(parent);
-	pthread_mutex_unlock(&parent->lock);
+	pthread_mutex_lock(&inode->lock);
+	__vbfs_remove_inode(inode);
+	pthread_mutex_unlock(&inode->lock);
 
 	return 0;
 }
 
 static int __vbfs_rmdir(struct inode_info *inode)
 {
-	if (inode->ref > 2 || inode->dirent->i_ino == ROOT_INO)
+	if (inode->dirent->i_ino == ROOT_INO) {
+		//log_dbg("%d, %s", inode->ref, inode->dirent->name);
 		return -EBUSY;
+	}
 
 	/* check is empty */
 	if (__vbfs_check_empty(inode))
