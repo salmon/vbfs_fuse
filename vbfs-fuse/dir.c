@@ -91,7 +91,7 @@ static void save_dirent(struct vbfs_dirent_disk *dir_dk, struct vbfs_dirent *dir
 	dir_dk->i_ino = cpu_to_le32(dir->i_ino);
 	dir_dk->i_pino = cpu_to_le32(dir->i_pino);
 	dir_dk->i_mode = cpu_to_le32(dir->i_mode);
-	dir_dk->i_size = cpu_to_le32(dir->i_size);
+	dir_dk->i_size = cpu_to_le64(dir->i_size);
 	dir_dk->i_atime = cpu_to_le32(dir->i_atime);
 	dir_dk->i_ctime = cpu_to_le32(dir->i_ctime);
 	dir_dk->i_mtime = cpu_to_le32(dir->i_mtime);
