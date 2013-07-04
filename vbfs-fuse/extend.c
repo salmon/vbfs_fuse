@@ -81,12 +81,18 @@ static struct extend_buf *alloc_buffer(struct queue *q)
 		return NULL;
 	}
 
+	pthread_mutex_init(&b->lock, NULL);
+	pthread_cond_init(&b->cond, NULL);
+
 	return b;
 }
 
 static void free_buffer(struct extend_buf *b)
 {
 	struct queue *q = b->q;
+
+	pthread_mutex_destroy(&b->lock);
+	pthread_cond_destroy(&b->cond);
 
 	free_buffer_data(q, b->data);
 	mp_free(b);
@@ -245,9 +251,6 @@ static void __free_buffer_wake(struct extend_buf *b)
 		q->need_reserved_buffers--;
 	}
 
-	pthread_mutex_destroy(&b->lock);
-	pthread_cond_destroy(&b->cond);
-
 	pthread_cond_signal(&q->free_buffer_cond);
 }
 
@@ -325,8 +328,6 @@ static struct extend_buf *__extend_new(struct queue *q, uint32_t eno,
 	b->error = 0;
 	INIT_LIST_HEAD(&b->data_list);
 	INIT_LIST_HEAD(&b->inode_list);
-	pthread_mutex_init(&b->lock, NULL);
-	pthread_cond_init(&b->cond, NULL);
 	__link_buffer(b, eno, LIST_CLEAN);
 
 	if (nf == NF_FRESH) {
