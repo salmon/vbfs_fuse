@@ -134,6 +134,8 @@ int __free_extend_bitmap(const uint32_t extend_no, int sync)
 	data_no = extend_no / get_bitmap_capacity();
 	offset = extend_no % get_bitmap_capacity();
 
+	BUG_ON(data_no == 0 && offset == 0);
+
 	data = extend_read(get_meta_queue(), data_no, &b);
 	if (IS_ERR(data))
 		return PTR_ERR(data);

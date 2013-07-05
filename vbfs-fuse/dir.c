@@ -844,6 +844,7 @@ int __vbfs_truncate(struct inode_info *inode, off_t size)
 	for (i = 0; i < offset; i ++) {
 		p_idx = start_off + i;
 		data_no = le32_to_cpu(*p_idx);
+		BUG_ON(ROOT_INO == data_no);
 		log_dbg("data_no %u", data_no);
 		free_extend_bitmap_async(data_no);
 	}
@@ -936,7 +937,7 @@ static int __vbfs_remove(struct inode_info *inode)
 {
 	//struct inode_info *parent;
 
-	free_extend_bitmap(inode->dirent->i_pino);
+	free_extend_bitmap(inode->dirent->i_ino);
 	/* Fix */
 	//__unlink_active_inode(inode);
 	inode->flags |= INODE_REMOVE;
