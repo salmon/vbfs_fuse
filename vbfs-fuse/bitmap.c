@@ -101,6 +101,7 @@ int __alloc_extend_bitmap(uint32_t *extend_no)
 		if (start_no == curr_no)
 			break;
 	}
+	sync_super();
 
 	ret = __alloc_bitmap(curr_no);
 	//log_dbg("currno %u, %d\n", curr_no, ret);
