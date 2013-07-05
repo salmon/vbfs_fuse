@@ -298,6 +298,7 @@ static void __write_dirty_buffers_async(struct queue *q)
 enum {
 	NF_FRESH = 0,
 	NF_READ = 1,
+	NF_GET = 2,
 };
 
 static struct extend_buf *__extend_new(struct queue *q, uint32_t eno,
@@ -315,6 +316,8 @@ static struct extend_buf *__extend_new(struct queue *q, uint32_t eno,
 	if (!new_b)
 		return NULL;
 
+	if (nf == NF_GET)
+		return NULL;
 	/* 
  	 * mutex was unlocked, so need to recheck.
 	 */
@@ -341,6 +344,9 @@ static struct extend_buf *__extend_new(struct queue *q, uint32_t eno,
 	return b;
 
 found_buffer:
+	if (nf == NF_GET && test_bit(B_READING, &b->state))
+		return NULL;
+
 	b->hold_cnt++;
 	__relink_lru(b, test_bit(B_DIRTY, &b->state) ||
 		test_bit(B_WRITING, &b->state));
@@ -373,6 +379,11 @@ static void *new_extend(struct queue *q, uint32_t eno, int nf, struct extend_buf
 	*bp = b;
 
 	return b->data;
+}
+
+void *extend_get(struct queue *q, uint32_t eno, struct extend_buf **bp)
+{
+	return new_extend(q, eno, NF_GET, bp);
 }
 
 void *extend_new(struct queue *q, uint32_t eno, struct extend_buf **bp)

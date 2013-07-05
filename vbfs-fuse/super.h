@@ -49,6 +49,7 @@ void init_dir_bm_size(uint32_t dir_bm_size);
 void init_dir_capacity(uint32_t dir_capacity);
 int init_super(const char *dev_name);
 int sync_super(void);
+int super_umount_clean(void);
 uint32_t get_bitmap_curr(void);
 uint32_t add_bitmap_curr(void);
 int meta_queue_create(void);

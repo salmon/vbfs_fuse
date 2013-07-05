@@ -4,7 +4,20 @@
 
 int sync_file(struct inode_info *inode)
 {
+	char *data;
+	struct extend_buf *b;
+
 	vbfs_inode_sync(inode);
+	if (inode->dirent->i_mode == VBFS_FT_REG_FILE) {
+		data = extend_get(get_data_queue(), inode->dirent->i_ino, &b);
+		if (IS_ERR(data))
+			return PTR_ERR(data);
+		if (!data)
+			return 0;
+
+		extend_write_dirty(b);
+		extend_put(b);
+	}
 
 	return 0;
 }
@@ -68,7 +81,9 @@ static int __alloc_ebuf_by_file_idx(struct inode_info *inode, int idx, struct ex
 
 	*p_index = cpu_to_le32(data_no);
 	extend_mark_dirty(b);
+#ifdef SYNC_METADATA
 	extend_write_dirty(b);
+#endif
 	extend_put(b);
 
 	return 0;
@@ -222,6 +237,12 @@ int __vbfs_write_buf(struct inode_info *inode, const char *buf, size_t size, off
 			inode->status = DIRTY;
 		}
 	}
+
+#ifdef SYNC_METADATA
+	__writeback_inode(inode, 1);
+#else
+	__writeback_inode(inode, 0);
+#endif
 
 	//log_err("i_size %u, write size %u", inode->dirent->i_size, wt_len + offset);
 

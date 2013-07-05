@@ -312,7 +312,7 @@ static void free_inode(struct inode_info *inode)
 	mp_free(inode);
 }
 
-static int __writeback_inode(struct inode_info *inode)
+int __writeback_inode(struct inode_info *inode, int sync)
 {
 	int ret = 0;
 	struct extend_buf *b;
@@ -335,7 +335,8 @@ static int __writeback_inode(struct inode_info *inode)
 	save_dirent((struct vbfs_dirent_disk *) data, inode->dirent);
 
 	extend_mark_dirty(b);
-	ret = extend_write_dirty(b);
+	if (sync)
+		ret = extend_write_dirty(b);
 	extend_put(b);
 	/* if ret == 0 */
 	inode->status = CLEAN;
@@ -348,7 +349,7 @@ int vbfs_inode_sync(struct inode_info *inode)
 	struct extend_buf *b;
 
 	pthread_mutex_lock(&inode->lock);
-	__writeback_inode(inode);
+	__writeback_inode(inode, 1);
 
 	list_for_each_entry(b, &inode->extend_list, inode_list) {
 		extend_write_dirty(b);

@@ -144,8 +144,8 @@ static void parse_options(int argc, char **argv)
 	}
 
 	/* check paramters */
-	if (vbfs_params.extend_size_kb < 512) {
-		fprintf(stderr, "extend size must bigger than 512KB\n");
+	if (vbfs_params.extend_size_kb < 64) {
+		fprintf(stderr, "extend size must bigger than 64KB\n");
 		cmd_usage();
 	}
 	if (vbfs_params.extend_size_kb > 8192) {

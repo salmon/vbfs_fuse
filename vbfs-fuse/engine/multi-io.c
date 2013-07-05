@@ -2,7 +2,7 @@
 #include "../log.h"
 #include "../ioengine.h"
 
-#define NR_THREAD 5
+#define NR_THREAD 4
 
 struct thread_info {
 	pthread_t *worker_thread;

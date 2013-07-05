@@ -165,6 +165,18 @@ int sync_super(void)
 	return ret;
 }
 
+int super_umount_clean(void)
+{
+	int ret;
+
+	pthread_mutex_lock(&vbfs_ctx.super.lock);
+	vbfs_ctx.super.s_state = CLEAN;
+	ret = sync_super_unlocked();
+	pthread_mutex_unlock(&vbfs_ctx.super.lock);
+
+	return ret;
+}
+
 uint32_t get_bitmap_curr(void)
 {
 	uint32_t bm_offset = 0;

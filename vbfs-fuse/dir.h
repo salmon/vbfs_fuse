@@ -60,6 +60,7 @@ int vbfs_inode_sync(struct inode_info *inode);
 int vbfs_inode_close(struct inode_info *inode);
 int vbfs_inode_update_times(struct inode_info *inode, time_update_flags mask);
 struct inode_info *pathname_to_inode(const char *pathname);
+int __writeback_inode(struct inode_info *inode, int sync);
 
 void fill_stbuf_by_dirent(struct stat *stbuf, struct vbfs_dirent *dirent);
 int vbfs_update_times(struct inode_info *inode, time_update_flags mask);

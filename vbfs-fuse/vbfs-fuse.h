@@ -21,8 +21,8 @@
 #define INODE_HASH(ino) \
 	((((ino) >> INODE_HASH_BITS) ^ (ino)) & \
 	((1 << INODE_HASH_BITS) - 1))
-#define BM_RESERVED_MAX 8
-#define DATA_RESERVED_MAX 128
+#define BM_RESERVED_MAX 16
+#define DATA_RESERVED_MAX 256
 
 enum {
 	CLEAN,

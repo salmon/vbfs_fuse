@@ -74,7 +74,9 @@ static int __alloc_bitmap(uint32_t eno)
 
 	ret = __alloc_bitmap_by_ebuf(b);
 
+#ifdef SYNC_METADATA
 	extend_write_dirty(b);
+#endif
 	extend_put(b);
 
 	return ret;

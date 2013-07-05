@@ -18,7 +18,7 @@ enum {
 	((1 << hash_bits) - 1))
 
 #define MAX_AGE 10
-#define CLEANUP_INTERVAL 5
+#define CLEANUP_INTERVAL 3
 
 struct queue {
 	struct list_head lru[LIST_SIZE];
@@ -72,6 +72,7 @@ struct extend_buf {
 
 void *extend_new(struct queue *q, uint32_t eno, struct extend_buf **bp);
 void *extend_read(struct queue *q, uint32_t eno, struct extend_buf **bp);
+void *extend_get(struct queue *q, uint32_t eno, struct extend_buf **bp);
 void extend_mark_dirty(struct extend_buf *b);
 void extend_put(struct extend_buf *b);
 void extend_release(struct extend_buf *b);

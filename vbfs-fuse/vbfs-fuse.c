@@ -454,6 +454,8 @@ static void vbfs_fuse_destroy(void *data)
 	queue_destroy(get_data_queue());
 	ioengine->io_exit();
 
+	super_umount_clean();
+
 	log_close();
 }
 
@@ -486,6 +488,8 @@ static void *vbfs_fuse_init(struct fuse_conn_info *conn)
 		log_err("root inode init error\n");
 		exit(1);
 	}
+
+	sync_super();
 
 	return NULL;
 }
