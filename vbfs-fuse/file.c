@@ -8,7 +8,8 @@ int sync_file(struct inode_info *inode)
 	struct extend_buf *b;
 
 	vbfs_inode_sync(inode);
-	if (inode->dirent->i_mode == VBFS_FT_REG_FILE) {
+	if (inode->dirent->i_mode == VBFS_FT_REG_FILE &&
+			(! inode->flags & INODE_REMOVE)) {
 		data = extend_get(get_data_queue(), inode->dirent->i_ino, &b);
 		if (IS_ERR(data))
 			return PTR_ERR(data);
