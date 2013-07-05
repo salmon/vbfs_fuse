@@ -3,7 +3,7 @@ make
 
 #../vbfs_format -e 192 /dev/sda
 
-./vbfs_fuse -o /mnt /dev/sda
+#./vbfs_fuse -o /mnt /dev/sda
 ls -al /mnt
 #mkdir /mnt/test_c
 #mkdir /mnt/test_a
